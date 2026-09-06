@@ -8,6 +8,12 @@ import {
   type ToolDefinition as BinanceToolDefinition,
 } from '@nemesis-oss/binance-sdk';
 import { binanceRateLimiter } from './guardians/rate-limiter.js';
+import type { WatchOrchestrator } from './engine/orchestrator.js';
+import {
+  createRegisterWatchTool,
+  createListWatchesTool,
+  createRemoveWatchTool,
+} from './engine/watch-tools.js';
 
 export const adaptBinanceTool = (tool: BinanceToolDefinition, ctx: ToolContext): AnyTool =>
   defineTool({
@@ -143,7 +149,8 @@ export const createPaperBrokerPositionsTool = (): AnyTool =>
 
 export const createTradingRegistry = (
   binance: BinanceClient,
-  selectedTools: readonly string[] = CORE_SPOT_TOOLS
+  selectedTools: readonly string[] = CORE_SPOT_TOOLS,
+  orchestrator?: WatchOrchestrator
 ): ToolRegistry => {
   const ctx: ToolContext = {
     env: process.env.BINANCE_TESTNET !== 'false' ? 'testnet' : 'live',
@@ -156,12 +163,17 @@ export const createTradingRegistry = (
     .filter((t) => targetSet.has(t.name))
     .map((t) => adaptBinanceTool(t, ctx));
 
+  const watchTools = orchestrator
+    ? [createRegisterWatchTool(orchestrator), createListWatchesTool(orchestrator), createRemoveWatchTool(orchestrator)]
+    : [];
+
   return new ToolRegistry({
     tools: [
       ...adaptedTools,
       createPositionSizeTool(),
       createPaperBrokerOrderTool(),
       createPaperBrokerPositionsTool(),
+      ...watchTools,
     ],
     // Fail fast on slow exchange network responses
     timeoutMs: 15_000,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { marked, Renderer } from 'marked';
 import TerminalRenderer from 'marked-terminal';
@@ -6,6 +6,8 @@ import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 import { runTradingAgent } from '../agent.js';
 import { binanceRateLimiter } from '../guardians/rate-limiter.js';
 import { defaultModel } from '../config.js';
+import { WatchOrchestrator } from '../engine/orchestrator.js';
+import { WatcherPanel } from './WatcherPanel.js';
 
 const terminalRenderer = new TerminalRenderer({ showSectionPrefix: false, tab: 2 }) as unknown as InstanceType<
   typeof Renderer
@@ -71,19 +73,13 @@ interface ChatMessage { id: string; role: 'user' | 'agent'; content: string; ste
 interface TurnCollector { steps: AgentStep[]; }
 
 interface ChatHandlers {
-  collector: TurnCollector;
-  setStatus: (s: string) => void;
-  setSteps: React.Dispatch<React.SetStateAction<AgentStep[]>>;
-  setResponse: React.Dispatch<React.SetStateAction<string>>;
+  collector: TurnCollector; setStatus: (s: string) => void;
+  setSteps: React.Dispatch<React.SetStateAction<AgentStep[]>>; setResponse: React.Dispatch<React.SetStateAction<string>>;
 }
 
 interface AgentChatState {
-  messages: ChatMessage[];
-  isBusy: boolean;
-  status: string;
-  steps: AgentStep[];
-  response: string;
-  sendMessage: (prompt: string) => Promise<void>;
+  messages: ChatMessage[]; isBusy: boolean; status: string;
+  steps: AgentStep[]; response: string; sendMessage: (prompt: string) => Promise<void>;
 }
 
 interface LiveTurnProps {
@@ -237,7 +233,7 @@ const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
   },
 });
 
-const useAgentChat = (): AgentChatState => {
+const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState('Idle');
@@ -252,13 +248,13 @@ const useAgentChat = (): AgentChatState => {
     setResponse('');
     setMessages((prev) => [...prev, { id: String(Date.now()), role: 'user', content: text }]);
     const hooks = createLiveHooks({ collector, setStatus, setSteps, setResponse });
-    const answer = await runTradingAgent(text, { hooks });
+    const answer = await runTradingAgent(text, { hooks, orchestrator });
     setMessages((prev) => [...prev, { id: String(Date.now()), role: 'agent', content: answer, steps: [...collector.steps] }]);
     setSteps([]);
     setResponse('');
     setIsBusy(false);
     setStatus('Idle');
-  }, []);
+  }, [orchestrator]);
 
   return { messages, isBusy, status, steps, response, sendMessage };
 };
@@ -267,7 +263,13 @@ export const App = (): React.JSX.Element => {
   const { exit } = useApp();
   const [inputVal, setInputVal] = useState('');
   const [collapsed, setCollapsed] = useState(true);
-  const chat = useAgentChat();
+  const orchestrator = useMemo(() => new WatchOrchestrator(), []);
+  const chat = useAgentChat(orchestrator);
+
+  useEffect(() => {
+    orchestrator.start();
+    return (): void => orchestrator.stop();
+  }, [orchestrator]);
 
   const handleSubmit = useCallback((): void => {
     const trimmed = inputVal.trim();
@@ -280,6 +282,7 @@ export const App = (): React.JSX.Element => {
   return (
     <Box flexDirection="column" padding={1}>
       <Header collapsed={collapsed} />
+      <WatcherPanel orchestrator={orchestrator} />
       <MessageHistory messages={chat.messages} collapsed={collapsed} />
       <LiveTurn busy={chat.isBusy} status={chat.status} steps={chat.steps} response={chat.response} collapsed={collapsed} />
       <PromptInput

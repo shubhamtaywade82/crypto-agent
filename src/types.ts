@@ -52,3 +52,30 @@ export type AgentEvent =
   | { readonly type: 'metrics'; readonly turn: number; readonly latencyMs: number; readonly isFinal: boolean }
   | { readonly type: 'done' };
 
+export type WatchConditionType = 'price_above' | 'price_below';
+
+export interface WatchCondition {
+  readonly id: string;
+  readonly symbol: string;
+  readonly strategy: string;
+  readonly type: WatchConditionType;
+  readonly targetPrice: number;
+  readonly cooldownMs: number;
+  readonly createdAt: number;
+  readonly reEvaluationPrompt: string;
+}
+
+export interface WatchTriggerEvent {
+  readonly condition: WatchCondition;
+  readonly currentPrice: number;
+  readonly triggeredAt: number;
+}
+
+export interface WatcherStatus {
+  readonly id: string;
+  readonly symbol: string;
+  readonly type: WatchConditionType;
+  readonly targetPrice: number;
+  readonly strategy: string;
+  readonly isConnected: boolean;
+}

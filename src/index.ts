@@ -5,6 +5,9 @@ export * from './types.js';
 export * from './config.js';
 export * from './tools.js';
 export * from './agent.js';
+export { PriceWatcher } from './engine/watcher.js';
+export { WatchOrchestrator } from './engine/orchestrator.js';
+export { sendTelegramAlert, sendTelegramStatus } from './notifications/telegram.js';
 
 const isDirectRun =
   Boolean(process.argv[1]) &&

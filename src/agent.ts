@@ -8,6 +8,7 @@ import {
   type ToolRegistry,
 } from '@nemesis-oss/ollama-sdk';
 import type { BinanceClient } from '@nemesis-oss/binance-sdk';
+import type { WatchOrchestrator } from './engine/orchestrator.js';
 import { binanceClient, defaultModel, ollamaClient } from './config.js';
 import { createTradingRegistry } from './tools.js';
 
@@ -19,6 +20,7 @@ export interface TradingAgentOptions {
   readonly think?: boolean | 'low' | 'medium' | 'high' | 'max' | undefined;
   readonly tools?: readonly string[] | undefined;
   readonly hooks?: AgentHooks | undefined;
+  readonly orchestrator?: WatchOrchestrator | undefined;
 }
 
 const SYSTEM_PROMPT =
@@ -28,6 +30,9 @@ const SYSTEM_PROMPT =
   '- Use spot_order_book for liquidity and depth. ' +
   '- Use paper_broker_get_positions and paper_broker_place_order for simulated paper trading. ' +
   '- Use calculate_position_size to compute precise risk-adjusted lot sizes. ' +
+  '- Use register_price_watch to set up live WebSocket price alerts that auto-trigger re-analysis and Telegram notifications. ' +
+  '- Use list_active_watches to check currently active price watches. ' +
+  '- Use remove_price_watch to cancel a watch by its ID. ' +
   'All Binance access is public market data only (no private keys required). ' +
   'Always reason step-by-step and verify data before executing trades.';
 
@@ -129,7 +134,7 @@ export const runTradingAgent = async (
 ): Promise<string> => {
   const ollama = options.ollama ?? ollamaClient;
   const binance = options.binance ?? binanceClient;
-  const registry = createTradingRegistry(binance, options.tools);
+  const registry = createTradingRegistry(binance, options.tools, options.orchestrator);
 
   return executeReActLoop(ollama, registry, options, [
     { role: 'system', content: SYSTEM_PROMPT },
