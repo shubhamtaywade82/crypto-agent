@@ -24,10 +24,13 @@
     "dotenv": "^16.4.5",
     "hono": "^4.13.7",
     "ink": "^7.1.1",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0",
     "react": "^19.2.8",
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@types/marked-terminal": "^6.1.1",
     "@types/node": "^22.20.0",
     "@types/react": "^19.2.18",
     "eslint": "^9.20.0",
