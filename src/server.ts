@@ -8,6 +8,14 @@ export const app = new Hono();
 
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: Date.now() }));
 
+app.get('/metrics', (c) =>
+  c.json({
+    uptimeSeconds: Math.floor(process.uptime()),
+    memoryUsageMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    timestamp: Date.now(),
+  })
+);
+
 app.get('/api/klines', async (c) => {
   const symbol = (c.req.query('symbol') ?? 'BTCUSDT').toUpperCase();
   const rawKlines = await binanceClient.spot.market.klines(symbol, '1h', { limit: 60 });

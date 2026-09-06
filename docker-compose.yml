@@ -10,7 +10,8 @@ services:
       - OLLAMA_MODEL=gemma4:cloud
       - PAPER_BROKER_URL=http://host.docker.internal:3000
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     restart: unless-stopped
 
   ollama:
@@ -22,6 +23,19 @@ services:
       - ollama_data:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=24h
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
 volumes:

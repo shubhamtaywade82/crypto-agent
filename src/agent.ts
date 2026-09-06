@@ -46,6 +46,10 @@ export const runTradingAgent = async (
     options: {
       temperature: 0.2,
       num_ctx: 32768,
+      num_batch: 512,
+      num_gpu: 999,
+      use_mlock: true,
+      num_predict: 1024,
     },
   });
 

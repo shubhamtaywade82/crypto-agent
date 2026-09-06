@@ -33,6 +33,14 @@ describe('Hono Server API & Streaming Endpoints', () => {
     expect(data.status).toBe('ok');
   });
 
+  it('GET /metrics returns uptime and memory usage', async () => {
+    const res = await app.request('/metrics');
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { uptimeSeconds: number; memoryUsageMb: number };
+    expect(typeof data.uptimeSeconds).toBe('number');
+    expect(typeof data.memoryUsageMb).toBe('number');
+  });
+
   it('GET /api/klines returns lightweight-charts formatted candles', async () => {
     const res = await app.request('/api/klines?symbol=BTCUSDT');
     expect(res.status).toBe(200);
