@@ -42,7 +42,8 @@ export class BinanceRateLimiter {
   }
 
   public async requestPermission(toolName: string): Promise<void> {
-    const weight = this.weightMap[toolName] ?? 2;
+    const normalized = toolName.replace(/^spot_/, '');
+    const weight = this.weightMap[toolName] ?? this.weightMap[normalized] ?? 2;
     this.cleanWindow();
 
     const projected = this.getCurrentWeight() + weight;
