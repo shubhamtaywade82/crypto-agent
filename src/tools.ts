@@ -7,13 +7,18 @@ import {
   type ToolContext,
   type ToolDefinition as BinanceToolDefinition,
 } from '@nemesis-oss/binance-sdk';
+import { binanceRateLimiter } from './guardians/rate-limiter.js';
 
 export const adaptBinanceTool = (tool: BinanceToolDefinition, ctx: ToolContext): AnyTool =>
   defineTool({
     name: tool.name,
     description: tool.description,
     schema: tool.inputSchema,
-    execute: async (args) => tool.handler(args, ctx),
+    execute: async (args) => {
+      // Guard against Binance API rate limits and IP ban thresholds
+      await binanceRateLimiter.requestPermission(tool.name);
+      return tool.handler(args, ctx);
+    },
   });
 
 const positionSizeSchema = z.object({

@@ -10,12 +10,14 @@
     "server": "tsx src/server.ts",
     "server:start": "node dist/server.js",
     "dev": "tsx src/main.ts",
+    "mcp": "tsx src/mcp-server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@nemesis-oss/binance-sdk": "^2.0.0",
     "@nemesis-oss/ollama-sdk": "^1.3.0",
     "decimal.js": "^10.4.3",

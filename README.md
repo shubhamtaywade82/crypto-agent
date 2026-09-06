@@ -31,6 +31,8 @@ graph TD
 ## ✨ Features
 
 - **ReAct Decision Loop:** Native tool calling with `think: 'high'` reasoning traces powered by Gemma 4.
+- **Rate-Limit Guardian:** Rolling 60s window tracking (`BinanceRateLimiter`, 1200 weight cap, 1000 safe threshold) protecting against Binance 429/418 IP bans.
+- **MCP Server Bridge:** Stdio-based Model Context Protocol server (`src/mcp-server.ts`) exposing Binance tools to Claude Desktop and Cursor.
 - **Precision Lot Sizing:** Quantitative risk management (`ROUND_DOWN`, zero-division guards) with `decimal.js`.
 - **Public Market Tools:** Zero-API-key market intelligence (`ticker24hr`, `depth`, `klines`, `trades`, `avgPrice`) adapted from `@nemesis-oss/binance-sdk`.
 - **Non-Invasive Paper Trading:** Safe HTTP bridge to `paper-broker` (`POST /orders`, `GET /positions`) with automatic mock fallback when offline.

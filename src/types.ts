@@ -44,3 +44,11 @@ export interface PlaceOrderResult {
   readonly status: 'FILLED' | 'NEW';
   readonly timestamp: number;
 }
+
+export type AgentEvent =
+  | { readonly type: 'token'; readonly content: string }
+  | { readonly type: 'tool_call'; readonly name: string; readonly args: Record<string, unknown> }
+  | { readonly type: 'tool_result'; readonly name: string; readonly result: unknown }
+  | { readonly type: 'metrics'; readonly turn: number; readonly latencyMs: number; readonly isFinal: boolean }
+  | { readonly type: 'done' };
+
