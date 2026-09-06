@@ -98,7 +98,7 @@ const useSpinner = (active: boolean): string => {
   return SPINNER_FRAMES[frame] ?? '⠋';
 };
 
-const Header = ({ collapsed, children }: { collapsed: boolean; children?: React.ReactNode }): React.JSX.Element => (
+const Header = ({ collapsed }: { collapsed: boolean }): React.JSX.Element => (
   <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
     <Text bold color="cyan">🤖 Crypto Agent — Autonomous ReAct Trading Terminal</Text>
     <Box gap={2}>
@@ -107,7 +107,6 @@ const Header = ({ collapsed, children }: { collapsed: boolean; children?: React.
       <Text color="gray">Thoughts: <Text color="magenta">{collapsed ? '▸ Collapsed' : '▾ Expanded'} [Ctrl+T]</Text></Text>
       <Text color="gray">Rate Limit: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
     </Box>
-    {children}
   </Box>
 );
 
@@ -268,9 +267,10 @@ export const App = (): React.JSX.Element => {
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Header collapsed={collapsed}><WatcherPanel orchestrator={orchestrator} /></Header>
+      <Header collapsed={collapsed} />
       <MessageHistory messages={chat.messages} collapsed={collapsed} />
       <LiveTurn busy={chat.isBusy} status={chat.status} steps={chat.steps} response={chat.response} collapsed={collapsed} />
+      <WatcherPanel orchestrator={orchestrator} />
       <PromptInput
         value={inputVal} busy={chat.isBusy} onSubmit={handleSubmit} onChange={setInputVal}
         onToggleCollapse={(): void => setCollapsed((c) => !c)} onHistoryUp={handleUp} onHistoryDown={handleDown}

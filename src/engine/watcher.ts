@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { SpotMarketWS } from '@nemesis-oss/binance-sdk';
-import type { WatchCondition, WatcherStatus, WatchTriggerEvent } from '../types.js';
+import type { MarketTicker, WatchCondition, WatcherStatus, WatchTriggerEvent } from '../types.js';
+
+export const CORE_MARKET_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'] as const;
 
 // Binance WS payload shape (supports real-time trade and miniTicker)
 interface WsPriceData {
@@ -48,6 +50,8 @@ export class PriceWatcher extends EventEmitter {
     this.ws.on('message', (_stream: string, data: unknown) => {
       this.handleTick(data as WsPriceData);
     });
+    for (const sym of CORE_MARKET_SYMBOLS) this.subscribedSymbols.add(sym);
+    this.ws.subscribe(CORE_MARKET_SYMBOLS.map((s) => this.ws.trade(s)));
   }
 
   addWatch(condition: WatchCondition): void {
@@ -61,6 +65,13 @@ export class PriceWatcher extends EventEmitter {
 
   removeWatch(id: string): boolean {
     return this.conditions.delete(id);
+  }
+
+  getMarketTickers(): MarketTicker[] {
+    return CORE_MARKET_SYMBOLS.map((sym) => ({
+      symbol: sym,
+      price: this.latestPrices.get(sym),
+    }));
   }
 
   getStatuses(): WatcherStatus[] {

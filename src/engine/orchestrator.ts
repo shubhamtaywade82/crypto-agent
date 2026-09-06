@@ -1,7 +1,7 @@
 import { PriceWatcher } from './watcher.js';
 import { runTradingAgent } from '../agent.js';
 import { sendTelegramAlert, sendTelegramStatus } from '../notifications/telegram.js';
-import type { WatchCondition, WatchTriggerEvent, WatcherStatus } from '../types.js';
+import type { MarketTicker, WatchCondition, WatchTriggerEvent, WatcherStatus } from '../types.js';
 
 type TriggerListener = (event: WatchTriggerEvent, analysis: string) => void;
 type TickListener = (symbol: string, price: number) => void;
@@ -51,6 +51,10 @@ export class WatchOrchestrator {
 
   getStatuses(): WatcherStatus[] {
     return this.watcher.getStatuses();
+  }
+
+  getMarketTickers(): MarketTicker[] {
+    return this.watcher.getMarketTickers();
   }
 
   onTrigger(listener: TriggerListener): void {

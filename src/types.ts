@@ -80,3 +80,8 @@ export interface WatcherStatus {
   readonly isConnected: boolean;
   readonly currentPrice?: number | undefined;
 }
+
+export interface MarketTicker {
+  readonly symbol: string;
+  readonly price?: number | undefined;
+}

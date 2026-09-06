@@ -142,6 +142,25 @@ describe('PriceWatcher', () => {
     expect(watcher.getStatuses()[0]?.currentPrice).toBe(108.25);
     watcher.stop();
   });
+
+  it('returns core market tickers and updates on live trade events', async () => {
+    const { EventEmitter } = await import('node:events');
+    const watcher = new PriceWatcher();
+    watcher.start();
+
+    const initial = watcher.getMarketTickers();
+    expect(initial).toHaveLength(4);
+    expect(initial.map((t) => t.symbol)).toEqual(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']);
+
+    const ws = (watcher as unknown as { ws: InstanceType<typeof EventEmitter> }).ws;
+    ws.emit('message', 'btcusdt@trade', { s: 'BTCUSDT', p: '80000' });
+    ws.emit('message', 'xrpusdt@trade', { s: 'XRPUSDT', p: '1.45' });
+
+    const updated = watcher.getMarketTickers();
+    expect(updated.find((t) => t.symbol === 'BTCUSDT')?.price).toBe(80000);
+    expect(updated.find((t) => t.symbol === 'XRPUSDT')?.price).toBe(1.45);
+    watcher.stop();
+  });
 });
 
 describe('Watch Tools', () => {
