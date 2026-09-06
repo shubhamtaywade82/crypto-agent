@@ -51,7 +51,7 @@ export const runTradingAgent = async (
       num_batch: 512,
       num_gpu: 999,
       use_mlock: true,
-      num_predict: 1024,
+      num_predict: 4096,
     },
   });
 

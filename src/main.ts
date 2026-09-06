@@ -8,9 +8,24 @@ import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 const formatPreview = (val: unknown): string =>
   (typeof val === 'object' ? JSON.stringify(val) : String(val)).slice(0, 80);
 
-const createCliHooks = (): AgentHooks => {
+interface CliHookState {
+  hasStreamedToken: boolean;
+}
+
+const printToolStart = (name: string, args: unknown): void => {
+  process.stdout.write(`\n🛠️  Tool: \x1b[36m${name}\x1b[0m(${JSON.stringify(args)})\n`);
+};
+
+const printToolEnd = (name: string, outputString: string): void => {
+  process.stdout.write(`📦 Result: \x1b[32m${name}\x1b[0m -> ${formatPreview(outputString)}...\n`);
+};
+
+const printThought = (thought: string): void => {
+  process.stdout.write(`\n🧠 Thought:\n\x1b[90m${thought.trim()}\x1b[0m\n`);
+};
+
+const createCliHooks = (state: CliHookState): AgentHooks => {
   let isThinking = false;
-  let isFirstToken = true;
 
   const resetThinking = (): void => {
     if (isThinking) {
@@ -19,34 +34,35 @@ const createCliHooks = (): AgentHooks => {
     }
   };
 
+  const handleToken = (token: string): void => {
+    resetThinking();
+    if (!state.hasStreamedToken) {
+      process.stdout.write('\n💬 Agent Response:\n');
+      state.hasStreamedToken = true;
+    }
+    process.stdout.write(token);
+  };
+
   return {
-    onThinking: (chunk: string): void => {
-      if (!isThinking) {
-        process.stdout.write('\n🧠 Thought:\n\x1b[90m');
-        isThinking = true;
-      }
-      process.stdout.write(chunk);
-    },
     onToolCallStart: (call): void => {
       resetThinking();
-      process.stdout.write(`\n🛠️  Tool: \x1b[36m${call.function.name}\x1b[0m(${JSON.stringify(call.function.arguments)})\n`);
+      printToolStart(call.function.name, call.function.arguments);
     },
-    onToolCallEnd: (res): void => {
-      process.stdout.write(`📦 Result: \x1b[32m${res.toolName}\x1b[0m -> ${formatPreview(res.outputString)}...\n`);
-    },
-    onToken: (token: string): void => {
+    onToolCallEnd: (res): void => printToolEnd(res.toolName, res.outputString),
+    onTurnEnd: (turn): void => {
       resetThinking();
-      if (isFirstToken) {
-        process.stdout.write('\n💬 Agent Response:\n');
-        isFirstToken = false;
-      }
-      process.stdout.write(token);
+      if (turn.message.thinking) printThought(turn.message.thinking);
     },
+    onToken: handleToken,
   };
 };
 
 const executeWithStreaming = async (prompt: string): Promise<void> => {
-  await runTradingAgent(prompt, { hooks: createCliHooks() });
+  const state: CliHookState = { hasStreamedToken: false };
+  const answer = await runTradingAgent(prompt, { hooks: createCliHooks(state) });
+  if (!state.hasStreamedToken && answer) {
+    process.stdout.write(`\n💬 Agent Response:\n${answer}\n`);
+  }
   process.stdout.write('\n');
 };
 

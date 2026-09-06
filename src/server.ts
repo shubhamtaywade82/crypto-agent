@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 import { runTradingAgent } from './agent.js';
 import { binanceClient } from './config.js';
 
@@ -37,34 +38,52 @@ app.post('/api/chat', async (c) => {
   return c.json({ answer, timestamp: Date.now() });
 });
 
+type SSEStream = Parameters<Parameters<typeof streamSSE>[1]>[0];
+
+const createStreamHooks = (stream: SSEStream, onTokenSeen: () => void): AgentHooks => ({
+  onThinking: async (chunk): Promise<void> => {
+    await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ type: 'thinking', content: chunk }) });
+  },
+  onToolCallStart: async (call): Promise<void> => {
+    await stream.writeSSE({
+      event: 'tool_call',
+      data: JSON.stringify({ type: 'tool_call', name: call.function.name, args: call.function.arguments }),
+    });
+  },
+  onToolCallEnd: async (res): Promise<void> => {
+    const result = res.success ? res.result : res.error.message;
+    await stream.writeSSE({
+      event: 'tool_result',
+      data: JSON.stringify({ type: 'tool_result', name: res.toolName, result }),
+    });
+  },
+  onTurnEnd: async (turn): Promise<void> => {
+    if (turn.message.thinking) {
+      await stream.writeSSE({
+        event: 'thinking',
+        data: JSON.stringify({ type: 'thinking', content: turn.message.thinking }),
+      });
+    }
+  },
+  onToken: async (token): Promise<void> => {
+    onTokenSeen();
+    await stream.writeSSE({ event: 'token', data: JSON.stringify({ type: 'token', content: token }) });
+  },
+});
+
 app.get('/api/chat/stream', (c) => {
   const prompt = c.req.query('prompt') ?? 'Summarize current BTC market';
   return streamSSE(c, async (stream) => {
+    let hasStreamedToken = false;
     await stream.writeSSE({ event: 'start', data: JSON.stringify({ type: 'start' }) });
-
-    await runTradingAgent(prompt, {
-      hooks: {
-        onThinking: async (chunk) => {
-          await stream.writeSSE({ event: 'thinking', data: JSON.stringify({ type: 'thinking', content: chunk }) });
-        },
-        onToolCallStart: async (call) => {
-          await stream.writeSSE({
-            event: 'tool_call',
-            data: JSON.stringify({ type: 'tool_call', name: call.function.name, args: call.function.arguments }),
-          });
-        },
-        onToolCallEnd: async (res) => {
-          const result = res.success ? res.result : res.error.message;
-          await stream.writeSSE({
-            event: 'tool_result',
-            data: JSON.stringify({ type: 'tool_result', name: res.toolName, result }),
-          });
-        },
-        onToken: async (token) => {
-          await stream.writeSSE({ event: 'token', data: JSON.stringify({ type: 'token', content: token }) });
-        },
-      },
+    const hooks = createStreamHooks(stream, () => {
+      hasStreamedToken = true;
     });
+    const answer = await runTradingAgent(prompt, { hooks });
+
+    if (!hasStreamedToken && answer) {
+      await stream.writeSSE({ event: 'token', data: JSON.stringify({ type: 'token', content: answer }) });
+    }
 
     await stream.writeSSE({ event: 'done', data: JSON.stringify({ type: 'done' }) });
   });
