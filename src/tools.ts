@@ -66,7 +66,7 @@ export const createPositionSizeTool = (): AnyTool =>
     execute: async (input) => executePositionSize(input),
   });
 
-// Core subset of high-signal tools to avoid LLM context bloat while keeping full analytical power
+// Core subset of public market data tools (no private/signed API keys required)
 export const CORE_SPOT_TOOLS = [
   'spot_ping',
   'spot_server_time',
@@ -78,10 +78,6 @@ export const CORE_SPOT_TOOLS = [
   'spot_recent_trades',
   'spot_klines',
   'spot_avg_price',
-  'spot_account',
-  'spot_new_order',
-  'spot_cancel_order',
-  'spot_open_orders',
 ] as const;
 
 const paperOrderSchema = z.object({

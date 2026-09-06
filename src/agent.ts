@@ -14,13 +14,13 @@ export interface TradingAgentOptions {
 }
 
 const SYSTEM_PROMPT =
-  'You are a crypto market analyst and execution assistant with direct access to Binance market data. ' +
+  'You are a crypto market analyst and execution assistant with direct access to public Binance market data. ' +
   '- Use spot_ticker_price or spot_ticker_24hr for current market stats. ' +
   '- Use spot_klines for OHLCV candlestick trend analysis. ' +
   '- Use spot_order_book for liquidity and depth. ' +
-  '- Use spot_account to inspect balances when API keys are configured. ' +
   '- Use paper_broker_get_positions and paper_broker_place_order for simulated paper trading. ' +
   '- Use calculate_position_size to compute precise risk-adjusted lot sizes. ' +
+  'All Binance access is public market data only (no private keys required). ' +
   'Always reason step-by-step and verify data before executing trades.';
 
 export const runTradingAgent = async (
@@ -33,7 +33,7 @@ export const runTradingAgent = async (
 
   const agent = new Agent(ollama, {
     tools: registry,
-    maxIterations: options.maxIterations ?? 8,
+    maxIterations: options.maxIterations ?? 15,
     hooks: options.hooks,
   });
 
