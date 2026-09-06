@@ -82,10 +82,13 @@ describe('Tool Adapter & Trading Registry with Built-in Binance Tools', () => {
     const registry = createTradingRegistry(mockBinance, ['spot_ticker_price', 'spot_klines']);
     const defs = registry.definitions();
 
-    expect(defs).toHaveLength(3); // 2 spot tools + calculate_position_size
+    // 2 spot tools + calculate_position_size + 2 paper-broker tools = 5
+    expect(defs).toHaveLength(5);
     const names = defs.map((d) => d.function.name);
     expect(names).toContain('spot_ticker_price');
     expect(names).toContain('spot_klines');
     expect(names).toContain('calculate_position_size');
+    expect(names).toContain('paper_broker_place_order');
+    expect(names).toContain('paper_broker_get_positions');
   });
 });
