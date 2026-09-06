@@ -50,31 +50,24 @@ export const formatToolResult = (raw: string): string => {
   return flat.length > 70 ? `${flat.slice(0, 67)}...` : flat;
 };
 
-export interface ToolEntry {
-  id?: string;
-  name: string;
-  args: unknown;
-  result?: string;
-}
+export interface ToolEntry { id?: string; name: string; args: unknown; result?: string; }
+export interface ThoughtStep { type: 'thought'; content: string; }
+export interface ToolStep { type: 'tool'; tool: ToolEntry; }
+export type AgentStep = ThoughtStep | ToolStep;
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'agent';
   content: string;
-  thoughts?: string;
-  tools?: ToolEntry[];
+  steps?: AgentStep[];
 }
 
-interface TurnCollector {
-  thoughts: string;
-  tools: ToolEntry[];
-}
+interface TurnCollector { steps: AgentStep[]; }
 
 interface ChatHandlers {
   collector: TurnCollector;
   setStatus: (s: string) => void;
-  setThoughts: React.Dispatch<React.SetStateAction<string>>;
-  setTools: React.Dispatch<React.SetStateAction<ToolEntry[]>>;
+  setSteps: React.Dispatch<React.SetStateAction<AgentStep[]>>;
   setResponse: React.Dispatch<React.SetStateAction<string>>;
 }
 
@@ -82,8 +75,7 @@ interface AgentChatState {
   messages: ChatMessage[];
   isBusy: boolean;
   status: string;
-  thoughts: string;
-  tools: ToolEntry[];
+  steps: AgentStep[];
   response: string;
   sendMessage: (prompt: string) => Promise<void>;
 }
@@ -111,6 +103,22 @@ const Header = (): React.JSX.Element => (
   </Box>
 );
 
+const StepList = ({ steps, keyPrefix }: { steps: AgentStep[]; keyPrefix: string }): React.JSX.Element => (
+  <Box flexDirection="column">
+    {steps.map((step, idx) => (
+      step.type === 'thought' ? (
+        <Box key={`${keyPrefix}-${idx}`} marginY={1} paddingLeft={1} borderStyle="single" borderLeft borderColor="gray">
+          <Text color="gray" italic>🧠 {step.content.trim()}</Text>
+        </Box>
+      ) : (
+        <Text key={`${keyPrefix}-${idx}`} color="green">
+          🛠️ {step.tool.name}({formatToolArgs(step.tool.args)}) {step.tool.result ? `→ ${step.tool.result}` : '...'}
+        </Text>
+      )
+    ))}
+  </Box>
+);
+
 const MessageHistory = ({ messages }: { messages: ChatMessage[] }): React.JSX.Element => (
   <Box flexDirection="column">
     {messages.map((m) => (
@@ -119,16 +127,7 @@ const MessageHistory = ({ messages }: { messages: ChatMessage[] }): React.JSX.El
           <Text bold color="blue">👤 You: {m.content}</Text>
         ) : (
           <Box flexDirection="column">
-            {m.thoughts && (
-              <Box marginY={1} paddingLeft={1} borderStyle="single" borderLeft borderColor="gray">
-                <Text color="gray" italic>🧠 {m.thoughts.trim()}</Text>
-              </Box>
-            )}
-            {m.tools?.map((t, idx) => (
-              <Text key={`${t.name}-${idx}`} color="green">
-                🛠️ {t.name}({formatToolArgs(t.args)}) {t.result ? `→ ${t.result}` : ''}
-              </Text>
-            ))}
+            {m.steps && <StepList steps={m.steps} keyPrefix={`msg-${m.id}`} />}
             <Box flexDirection="column" marginTop={1}>
               <Text bold color="cyan">💬 Agent:</Text>
               <Text>{renderMarkdown(m.content)}</Text>
@@ -143,28 +142,18 @@ const MessageHistory = ({ messages }: { messages: ChatMessage[] }): React.JSX.El
 interface LiveTurnProps {
   busy: boolean;
   status: string;
-  thoughts: string;
-  tools: ToolEntry[];
+  steps: AgentStep[];
   response: string;
 }
 
-const LiveTurn = ({ busy, status, thoughts, tools, response }: LiveTurnProps): React.JSX.Element => {
+const LiveTurn = ({ busy, status, steps, response }: LiveTurnProps): React.JSX.Element => {
   const spinner = useSpinner(busy);
-  if (!busy && !response) return <Box />;
+  if (!busy) return <Box />;
 
   return (
     <Box flexDirection="column" marginY={1}>
-      {busy && <Text color="yellow">{spinner} {status}</Text>}
-      {thoughts.length > 0 && (
-        <Box marginY={1} paddingLeft={1} borderStyle="single" borderLeft borderColor="gray">
-          <Text color="gray" italic>🧠 {thoughts.trim()}</Text>
-        </Box>
-      )}
-      {tools.map((t, idx) => (
-        <Text key={`live-${t.name}-${idx}`} color="green">
-          🛠️ {t.name}({formatToolArgs(t.args)}) {t.result ? `→ ${t.result}` : '...'}
-        </Text>
-      ))}
+      <Text color="yellow">{spinner} {status}</Text>
+      <StepList steps={steps} keyPrefix="live" />
       {response.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text bold color="cyan">💬 Agent:</Text>
@@ -202,23 +191,43 @@ const PromptInput = ({ value, busy, onSubmit, onChange }: InputProps): React.JSX
   );
 };
 
+const recordThought = (collector: TurnCollector, chunk: string): void => {
+  const last = collector.steps[collector.steps.length - 1];
+  if (last?.type === 'thought') last.content += chunk;
+  else collector.steps.push({ type: 'thought', content: chunk });
+};
+
+const recordToolResult = (
+  collector: TurnCollector,
+  res: { toolCallId?: string; toolName: string; outputString: string }
+): void => {
+  const formatted = formatToolResult(res.outputString);
+  for (let i = collector.steps.length - 1; i >= 0; i--) {
+    const s = collector.steps[i];
+    if (s?.type === 'tool' && (res.toolCallId ? s.tool.id === res.toolCallId : s.tool.name === res.toolName && !s.tool.result)) {
+      s.tool.result = formatted;
+      break;
+    }
+  }
+};
+
 const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
   onThinking: (chunk: string): void => {
-    handlers.collector.thoughts += chunk;
+    recordThought(handlers.collector, chunk);
     handlers.setStatus('Reasoning...');
-    handlers.setThoughts((prev) => prev + chunk);
+    handlers.setSteps([...handlers.collector.steps]);
   },
   onToolCallStart: (call): void => {
-    handlers.collector.tools.push({ id: call.id, name: call.function.name, args: call.function.arguments });
+    handlers.collector.steps.push({
+      type: 'tool',
+      tool: { id: call.id, name: call.function.name, args: call.function.arguments },
+    });
     handlers.setStatus(`Calling ${call.function.name}...`);
-    handlers.setTools([...handlers.collector.tools]);
+    handlers.setSteps([...handlers.collector.steps]);
   },
   onToolCallEnd: (res): void => {
-    const target = handlers.collector.tools.find(
-      (t) => (res.toolCallId ? t.id === res.toolCallId : t.name === res.toolName && !t.result)
-    );
-    if (target) target.result = formatToolResult(res.outputString);
-    handlers.setTools([...handlers.collector.tools]);
+    recordToolResult(handlers.collector, res);
+    handlers.setSteps([...handlers.collector.steps]);
   },
   onToken: (token: string): void => {
     handlers.setStatus('Responding...');
@@ -230,31 +239,31 @@ const useAgentChat = (): AgentChatState => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState('Idle');
-  const [thoughts, setThoughts] = useState('');
-  const [tools, setTools] = useState<ToolEntry[]>([]);
+  const [steps, setSteps] = useState<AgentStep[]>([]);
   const [response, setResponse] = useState('');
 
   const sendMessage = useCallback(async (text: string): Promise<void> => {
-    const collector: TurnCollector = { thoughts: '', tools: [] };
+    const collector: TurnCollector = { steps: [] };
     setIsBusy(true);
     setStatus('Thinking with ReAct...');
-    setThoughts('');
-    setTools([]);
+    setSteps([]);
     setResponse('');
     setMessages((prev) => [...prev, { id: String(Date.now()), role: 'user', content: text }]);
 
-    const hooks = createLiveHooks({ collector, setStatus, setThoughts, setTools, setResponse });
+    const hooks = createLiveHooks({ collector, setStatus, setSteps, setResponse });
     const answer = await runTradingAgent(text, { hooks });
 
     setMessages((prev) => [
       ...prev,
-      { id: String(Date.now()), role: 'agent', content: answer, thoughts: collector.thoughts, tools: [...collector.tools] },
+      { id: String(Date.now()), role: 'agent', content: answer, steps: [...collector.steps] },
     ]);
+    setSteps([]);
+    setResponse('');
     setIsBusy(false);
     setStatus('Idle');
   }, []);
 
-  return { messages, isBusy, status, thoughts, tools, response, sendMessage };
+  return { messages, isBusy, status, steps, response, sendMessage };
 };
 
 export const App = (): React.JSX.Element => {
@@ -280,8 +289,7 @@ export const App = (): React.JSX.Element => {
       <LiveTurn
         busy={chat.isBusy}
         status={chat.status}
-        thoughts={chat.thoughts}
-        tools={chat.tools}
+        steps={chat.steps}
         response={chat.response}
       />
       <PromptInput value={inputVal} busy={chat.isBusy} onSubmit={handleSubmit} onChange={setInputVal} />
