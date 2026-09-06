@@ -5,30 +5,46 @@ import type { WatchCondition } from '../types.js';
 
 const watchSchema = z.object({
   symbol: z.string().describe('Trading pair, e.g. SOLUSDT'),
-  type: z.enum(['price_above', 'price_below']).describe('Trigger direction'),
   targetPrice: z.number().describe('Price level that triggers re-analysis'),
-  strategy: z.string().describe('Short label, e.g. "Breakout Buy"'),
-  reEvaluationPrompt: z.string().describe(
-    'Prompt sent to the agent when the condition fires. ' +
-    'Include the symbol, expected action, and what to verify.'
-  ),
-  cooldownMinutes: z.number().default(5).describe(
-    'Minutes to wait before re-triggering the same watch (default 5)'
-  ),
+  type: z
+    .enum(['price_above', 'price_below'])
+    .default('price_above')
+    .describe('Trigger direction: price_above or price_below (default: price_above)'),
+  strategy: z
+    .string()
+    .default('Key Level Watch')
+    .describe('Short label, e.g. "Breakout Buy" (default: "Key Level Watch")'),
+  reEvaluationPrompt: z
+    .string()
+    .optional()
+    .describe('Prompt sent to agent on trigger. If omitted, standard confirmation prompt is auto-generated.'),
+  cooldownMinutes: z
+    .number()
+    .default(5)
+    .describe('Minutes to wait before re-triggering (default 5)'),
 });
 
 type WatchInput = z.infer<typeof watchSchema>;
 
-const buildCondition = (input: WatchInput): WatchCondition => ({
-  id: `${input.symbol}-${input.type}-${Date.now()}`,
-  symbol: input.symbol.toUpperCase(),
-  type: input.type,
-  targetPrice: input.targetPrice,
-  strategy: input.strategy,
-  reEvaluationPrompt: input.reEvaluationPrompt,
-  cooldownMs: (input.cooldownMinutes ?? 5) * 60_000,
-  createdAt: Date.now(),
-});
+const buildCondition = (input: WatchInput): WatchCondition => {
+  const sym = input.symbol.toUpperCase();
+  const type = input.type ?? 'price_above';
+  const strategy = input.strategy ?? 'Key Level Watch';
+  const prompt =
+    input.reEvaluationPrompt ??
+    `CRITICAL EVENT: ${sym} triggered price watch at $${input.targetPrice} (${strategy}). Inspect order book and tape to confirm momentum.`;
+
+  return {
+    id: `${sym}-${type}-${Date.now()}`,
+    symbol: sym,
+    type,
+    targetPrice: input.targetPrice,
+    strategy,
+    reEvaluationPrompt: prompt,
+    cooldownMs: (input.cooldownMinutes ?? 5) * 60_000,
+    createdAt: Date.now(),
+  };
+};
 
 export const createRegisterWatchTool = (orchestrator: WatchOrchestrator): AnyTool =>
   defineTool({

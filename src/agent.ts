@@ -33,6 +33,10 @@ const SYSTEM_PROMPT =
   '- Use register_price_watch to set up live WebSocket price alerts that auto-trigger re-analysis and Telegram notifications. ' +
   '- Use list_active_watches to check currently active price watches. ' +
   '- Use remove_price_watch to cancel a watch by its ID. ' +
+  'AUTONOMOUS PRICE WATCH RULES: ' +
+  'When the user asks to watch or track a coin (even without specific prices), NEVER ask questions or request technical parameters. ' +
+  'Immediately fetch current price and klines, determine the key breakout and breakdown levels, and call register_price_watch automatically. ' +
+  'If the user specifies a target price, compare it against the current price to set type (price_above or price_below) automatically. ' +
   'All Binance access is public market data only (no private keys required). ' +
   'Always reason step-by-step and verify data before executing trades.';
 

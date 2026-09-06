@@ -34,23 +34,25 @@ const useWatcherData = (orchestrator: WatchOrchestrator): { statuses: WatcherSta
 };
 
 const WatchList = ({ statuses }: { statuses: WatcherStatus[] }): React.JSX.Element => (
-  <Box flexDirection="column">
-    <Text bold color="yellow">📡 Active Watchers:</Text>
-    {statuses.map((w) => (
+  <Box flexWrap="wrap" gap={1}>
+    <Text color="gray">📡 <Text bold color="yellow">Watches ({statuses.length}):</Text></Text>
+    {statuses.map((w, idx) => (
       <Text key={w.id} color="gray">
-        {'  '}{directionIcon(w.type)} {w.symbol}: {w.type === 'price_above' ? '>' : '<'} ${w.targetPrice} — {w.strategy}
-        {' '}({w.isConnected ? '🟢 live' : '🔴 disconnected'})
+        {idx > 0 && <Text color="gray">│ </Text>}
+        {directionIcon(w.type)} <Text color="cyan">{w.symbol}</Text> {w.type === 'price_above' ? '>' : '<'} <Text color="yellow">${w.targetPrice}</Text>
+        {' '}<Text color={w.isConnected ? 'green' : 'red'}>({w.isConnected ? 'live' : 'offline'})</Text>
       </Text>
     ))}
   </Box>
 );
 
 const TriggerList = ({ triggers }: { triggers: TriggerLog[] }): React.JSX.Element => (
-  <Box flexDirection="column" marginTop={1}>
-    <Text bold color="red">🔔 Recent Triggers:</Text>
-    {triggers.map((t, i) => (
+  <Box flexWrap="wrap" gap={1}>
+    <Text color="red">🔔 <Text bold color="red">Triggers:</Text></Text>
+    {triggers.slice(0, 3).map((t, i) => (
       <Text key={`trig-${i}`} color="yellow">
-        {'  '}⚡ {t.symbol} @ ${t.price} [{t.time}]
+        {i > 0 && <Text color="gray">│ </Text>}
+        ⚡ {t.symbol} @ ${t.price} [{t.time}]
       </Text>
     ))}
   </Box>
@@ -60,7 +62,7 @@ export const WatcherPanel = ({ orchestrator }: { orchestrator: WatchOrchestrator
   const { statuses, triggers } = useWatcherData(orchestrator);
   if (statuses.length === 0 && triggers.length === 0) return <Box />;
   return (
-    <Box flexDirection="column" marginBottom={1}>
+    <Box flexDirection="column" marginTop={1}>
       {statuses.length > 0 && <WatchList statuses={statuses} />}
       {triggers.length > 0 && <TriggerList triggers={triggers} />}
     </Box>

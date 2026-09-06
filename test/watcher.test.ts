@@ -118,3 +118,29 @@ describe('PriceWatcher', () => {
     watcher.stop();
   });
 });
+
+describe('Watch Tools', () => {
+  it('registers watch with minimal params using smart defaults', async () => {
+    const { createRegisterWatchTool } = await import('../src/engine/watch-tools.js');
+    const mockOrchestrator = {
+      addWatch: vi.fn(),
+      removeWatch: vi.fn(),
+      getStatuses: vi.fn().mockReturnValue([]),
+    } as unknown as import('../src/engine/orchestrator.js').WatchOrchestrator;
+
+    const tool = createRegisterWatchTool(mockOrchestrator);
+    const res = (await tool.execute({ symbol: 'SOLUSDT', targetPrice: 110 }, {})) as {
+      symbol: string;
+      targetPrice: number;
+      type: string;
+      status: string;
+    };
+
+    expect(res.symbol).toBe('SOLUSDT');
+    expect(res.targetPrice).toBe(110);
+    expect(res.type).toBe('price_above');
+    expect(res.status).toBe('watching');
+    expect(mockOrchestrator.addWatch).toHaveBeenCalledOnce();
+  });
+});
+

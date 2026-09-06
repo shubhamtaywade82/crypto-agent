@@ -8,6 +8,7 @@ import { binanceRateLimiter } from '../guardians/rate-limiter.js';
 import { defaultModel } from '../config.js';
 import { WatchOrchestrator } from '../engine/orchestrator.js';
 import { WatcherPanel } from './WatcherPanel.js';
+import { PromptHistory, usePromptHistoryNavigation } from './history.js';
 
 const terminalRenderer = new TerminalRenderer({ showSectionPrefix: false, tab: 2 }) as unknown as InstanceType<
   typeof Renderer
@@ -29,18 +30,13 @@ marked.setOptions({ renderer: terminalRenderer as unknown as InstanceType<typeof
 
 export const renderMarkdown = (text: string): string => {
   if (!text) return '';
-  try {
-    return (marked.parse(text) as string).trim();
-  } catch {
-    return text;
-  }
+  try { return (marked.parse(text) as string).trim(); } catch { return text; }
 };
 
 export const formatToolArgs = (args: unknown): string => {
   if (!args || (typeof args === 'object' && Object.keys(args).length === 0)) return '';
-  const str = typeof args === 'string' ? args : JSON.stringify(args);
-  const flattened = str.replace(/\s+/g, ' ').trim();
-  return flattened.length > 50 ? `${flattened.slice(0, 47)}...` : flattened;
+  const str = (typeof args === 'string' ? args : JSON.stringify(args)).replace(/\s+/g, ' ').trim();
+  return str.length > 50 ? `${str.slice(0, 47)}...` : str;
 };
 
 export const formatToolResult = (raw: string): string => {
@@ -50,8 +46,8 @@ export const formatToolResult = (raw: string): string => {
     if (Array.isArray(parsed)) return `[${parsed.length} items]`;
     if (parsed && typeof parsed === 'object') {
       if ('error' in parsed) return `Error: ${String((parsed as Record<string, unknown>).error)}`;
-      const compact = JSON.stringify(parsed);
-      return compact.length > 70 ? `${compact.slice(0, 67)}...` : compact;
+      const c = JSON.stringify(parsed);
+      return c.length > 70 ? `${c.slice(0, 67)}...` : c;
     }
   } catch { /* fallback to flat string */ }
   return flat.length > 70 ? `${flat.slice(0, 67)}...` : flat;
@@ -61,8 +57,7 @@ export const formatThoughtPreview = (text: string): string => {
   const trimmed = text.trim();
   const first = (trimmed.split('\n')[0] ?? '').replace(/\s+/g, ' ');
   const count = trimmed.split('\n').filter(Boolean).length;
-  const preview = first.length > 60 ? `${first.slice(0, 57)}...` : first;
-  return `▸ 🧠 Thought: ${preview} (${count} lines)`;
+  return `▸ 🧠 Thought: ${first.length > 60 ? `${first.slice(0, 57)}...` : first} (${count} lines)`;
 };
 
 export interface ToolEntry { id?: string; name: string; args: unknown; result?: string; }
@@ -87,7 +82,8 @@ interface LiveTurnProps {
 }
 
 interface InputProps {
-  value: string; busy: boolean; onSubmit: () => void; onChange: (val: string) => void; onToggleCollapse: () => void;
+  value: string; busy: boolean; onSubmit: () => void; onChange: (val: string) => void;
+  onToggleCollapse: () => void; onHistoryUp?: (() => void) | undefined; onHistoryDown?: (() => void) | undefined;
 }
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
@@ -102,7 +98,7 @@ const useSpinner = (active: boolean): string => {
   return SPINNER_FRAMES[frame] ?? '⠋';
 };
 
-const Header = ({ collapsed }: { collapsed: boolean }): React.JSX.Element => (
+const Header = ({ collapsed, children }: { collapsed: boolean; children?: React.ReactNode }): React.JSX.Element => (
   <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
     <Text bold color="cyan">🤖 Crypto Agent — Autonomous ReAct Trading Terminal</Text>
     <Box gap={2}>
@@ -111,28 +107,23 @@ const Header = ({ collapsed }: { collapsed: boolean }): React.JSX.Element => (
       <Text color="gray">Thoughts: <Text color="magenta">{collapsed ? '▸ Collapsed' : '▾ Expanded'} [Ctrl+T]</Text></Text>
       <Text color="gray">Rate Limit: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
     </Box>
+    {children}
   </Box>
 );
 
 const StepList = ({ steps, keyPrefix, collapsed }: { steps: AgentStep[]; keyPrefix: string; collapsed?: boolean }): React.JSX.Element => (
   <Box flexDirection="column">
-    {steps.map((s, idx) => {
-      if (s.type === 'tool') {
-        return (
-          <Text key={`${keyPrefix}-${idx}`} color="green">
-            🛠️ {s.tool.name}({formatToolArgs(s.tool.args)}) {s.tool.result ? `→ ${s.tool.result}` : '...'}
-          </Text>
-        );
-      }
-      if (collapsed) {
-        return <Text key={`${keyPrefix}-${idx}`} color="gray" italic>{formatThoughtPreview(s.content)}</Text>;
-      }
-      return (
-        <Box key={`${keyPrefix}-${idx}`} marginY={1} paddingLeft={1} borderStyle="single" borderLeft borderColor="gray">
-          <Text color="gray" italic>🧠 {s.content.trim()}</Text>
-        </Box>
-      );
-    })}
+    {steps.map((s, idx) => s.type === 'tool' ? (
+      <Text key={`${keyPrefix}-${idx}`} color="green">
+        🛠️ {s.tool.name}({formatToolArgs(s.tool.args)}) {s.tool.result ? `→ ${s.tool.result}` : '...'}
+      </Text>
+    ) : collapsed ? (
+      <Text key={`${keyPrefix}-${idx}`} color="gray" italic>{formatThoughtPreview(s.content)}</Text>
+    ) : (
+      <Box key={`${keyPrefix}-${idx}`} marginY={1} paddingLeft={1} borderStyle="single" borderLeft borderColor="gray">
+        <Text color="gray" italic>🧠 {s.content.trim()}</Text>
+      </Box>
+    ))}
   </Box>
 );
 
@@ -173,12 +164,16 @@ const LiveTurn = ({ busy, status, steps, response, collapsed }: LiveTurnProps): 
   );
 };
 
-const PromptInput = ({ value, busy, onSubmit, onChange, onToggleCollapse }: InputProps): React.JSX.Element => {
+const PromptInput = ({
+  value, busy, onSubmit, onChange, onToggleCollapse, onHistoryUp, onHistoryDown,
+}: InputProps): React.JSX.Element => {
   const { exit } = useApp();
   useInput((input, key) => {
     if (key.ctrl && (input === 'c' || input === '\u0003')) exit();
     else if (key.ctrl && (input === 't' || input === '\u0014')) onToggleCollapse();
     else if (busy) return;
+    else if (key.upArrow) onHistoryUp?.();
+    else if (key.downArrow) onHistoryDown?.();
     else if (key.return) onSubmit();
     else if (key.backspace || key.delete) onChange(value.slice(0, -1));
     else if (!key.ctrl && !key.meta && input) onChange(value + input);
@@ -199,17 +194,13 @@ const recordThought = (collector: TurnCollector, chunk: string): void => {
 };
 
 const recordToolResult = (
-  collector: TurnCollector,
-  res: { toolCallId?: string; toolName: string; outputString: string }
+  collector: TurnCollector, res: { toolCallId?: string; toolName: string; outputString: string }
 ): void => {
   const formatted = formatToolResult(res.outputString);
-  for (let i = collector.steps.length - 1; i >= 0; i--) {
-    const s = collector.steps[i];
-    if (s?.type === 'tool' && (res.toolCallId ? s.tool.id === res.toolCallId : s.tool.name === res.toolName && !s.tool.result)) {
-      s.tool.result = formatted;
-      break;
-    }
-  }
+  const target = collector.steps.slice().reverse().find(
+    (s) => s.type === 'tool' && (res.toolCallId ? s.tool.id === res.toolCallId : s.tool.name === res.toolName && !s.tool.result)
+  );
+  if (target?.type === 'tool') target.tool.result = formatted;
 };
 
 const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
@@ -242,18 +233,12 @@ const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
 
   const sendMessage = useCallback(async (text: string): Promise<void> => {
     const collector: TurnCollector = { steps: [] };
-    setIsBusy(true);
-    setStatus('Thinking with ReAct...');
-    setSteps([]);
-    setResponse('');
+    setIsBusy(true); setStatus('Thinking with ReAct...'); setSteps([]); setResponse('');
     setMessages((prev) => [...prev, { id: String(Date.now()), role: 'user', content: text }]);
     const hooks = createLiveHooks({ collector, setStatus, setSteps, setResponse });
     const answer = await runTradingAgent(text, { hooks, orchestrator });
     setMessages((prev) => [...prev, { id: String(Date.now()), role: 'agent', content: answer, steps: [...collector.steps] }]);
-    setSteps([]);
-    setResponse('');
-    setIsBusy(false);
-    setStatus('Idle');
+    setSteps([]); setResponse(''); setIsBusy(false); setStatus('Idle');
   }, [orchestrator]);
 
   return { messages, isBusy, status, steps, response, sendMessage };
@@ -261,9 +246,10 @@ const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
 
 export const App = (): React.JSX.Element => {
   const { exit } = useApp();
-  const [inputVal, setInputVal] = useState('');
   const [collapsed, setCollapsed] = useState(true);
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
+  const history = useMemo(() => new PromptHistory(), []);
+  const { inputVal, setInputVal, handleUp, handleDown } = usePromptHistoryNavigation(history);
   const chat = useAgentChat(orchestrator);
 
   useEffect(() => {
@@ -275,22 +261,19 @@ export const App = (): React.JSX.Element => {
     const trimmed = inputVal.trim();
     if (!trimmed) return;
     if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'quit') { exit(); return; }
+    history.save(trimmed);
     setInputVal('');
     void chat.sendMessage(trimmed);
-  }, [inputVal, chat, exit]);
+  }, [inputVal, chat, exit, history, setInputVal]);
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Header collapsed={collapsed} />
-      <WatcherPanel orchestrator={orchestrator} />
+      <Header collapsed={collapsed}><WatcherPanel orchestrator={orchestrator} /></Header>
       <MessageHistory messages={chat.messages} collapsed={collapsed} />
       <LiveTurn busy={chat.isBusy} status={chat.status} steps={chat.steps} response={chat.response} collapsed={collapsed} />
       <PromptInput
-        value={inputVal}
-        busy={chat.isBusy}
-        onSubmit={handleSubmit}
-        onChange={setInputVal}
-        onToggleCollapse={(): void => setCollapsed((c) => !c)}
+        value={inputVal} busy={chat.isBusy} onSubmit={handleSubmit} onChange={setInputVal}
+        onToggleCollapse={(): void => setCollapsed((c) => !c)} onHistoryUp={handleUp} onHistoryDown={handleDown}
       />
     </Box>
   );
