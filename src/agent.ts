@@ -1,4 +1,4 @@
-import { Agent, OllamaClient } from '@nemesis-oss/ollama-sdk';
+import { Agent, OllamaClient, type AgentHooks } from '@nemesis-oss/ollama-sdk';
 import type { BinanceClient } from '@nemesis-oss/binance-sdk';
 import { binanceClient, defaultModel, ollamaClient } from './config.js';
 import { createTradingRegistry } from './tools.js';
@@ -10,6 +10,7 @@ export interface TradingAgentOptions {
   readonly maxIterations?: number | undefined;
   readonly think?: boolean | 'low' | 'medium' | 'high' | 'max' | undefined;
   readonly tools?: readonly string[] | undefined;
+  readonly hooks?: AgentHooks | undefined;
 }
 
 const SYSTEM_PROMPT =
@@ -33,6 +34,7 @@ export const runTradingAgent = async (
   const agent = new Agent(ollama, {
     tools: registry,
     maxIterations: options.maxIterations ?? 8,
+    hooks: options.hooks,
   });
 
   const response = await agent.run({
