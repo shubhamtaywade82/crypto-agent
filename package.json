@@ -1,0 +1,30 @@
+{
+  "name": "crypto-agent",
+  "version": "1.0.0",
+  "description": "ReAct crypto trading agent powered by gemma4:31b and @nemesis-oss/ollama-sdk",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@nemesis-oss/binance-sdk": "^2.0.0",
+    "@nemesis-oss/ollama-sdk": "^1.3.0",
+    "decimal.js": "^10.4.3",
+    "dotenv": "^16.4.5",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "eslint": "^9.20.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.0"
+  }
+}
