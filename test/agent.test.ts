@@ -106,4 +106,13 @@ describe('UI Formatters & Markdown Renderer', () => {
     expect(rendered).not.toContain('**BoldText**');
     expect(rendered).toContain('BoldText');
   });
+
+  it('formats collapsed thought previews with single-line summary and line count', async () => {
+    const { formatThoughtPreview } = await import('../src/ui/App.js');
+    const thought = 'Line 1: analyzing SOLUSDT\nLine 2: checking indicators\nLine 3: done';
+    const preview = formatThoughtPreview(thought);
+    expect(preview).toContain('▸ 🧠 Thought:');
+    expect(preview).toContain('Line 1: analyzing SOLUSDT');
+    expect(preview).toContain('(3 lines)');
+  });
 });
