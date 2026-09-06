@@ -4,23 +4,20 @@ import { stdin as input, stdout as output } from 'node:process';
 import React from 'react';
 import { render } from 'ink';
 import { runTradingAgent } from './agent.js';
-import { App } from './ui/App.js';
+import { App, formatToolArgs, formatToolResult, renderMarkdown } from './ui/App.js';
 
 import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
-
-const formatPreview = (val: unknown): string =>
-  (typeof val === 'object' ? JSON.stringify(val) : String(val)).slice(0, 80);
 
 interface CliHookState {
   hasStreamedToken: boolean;
 }
 
 const printToolStart = (name: string, args: unknown): void => {
-  process.stdout.write(`\n🛠️  Tool: \x1b[36m${name}\x1b[0m(${JSON.stringify(args)})\n`);
+  process.stdout.write(`\n🛠️  Tool: \x1b[36m${name}\x1b[0m(${formatToolArgs(args)})\n`);
 };
 
 const printToolEnd = (name: string, outputString: string): void => {
-  process.stdout.write(`📦 Result: \x1b[32m${name}\x1b[0m -> ${formatPreview(outputString)}...\n`);
+  process.stdout.write(`📦 Result: \x1b[32m${name}\x1b[0m -> ${formatToolResult(outputString)}\n`);
 };
 
 const createCliHooks = (state: CliHookState): AgentHooks => {
@@ -66,7 +63,7 @@ const executeWithStreaming = async (prompt: string): Promise<void> => {
   const state: CliHookState = { hasStreamedToken: false };
   const answer = await runTradingAgent(prompt, { hooks: createCliHooks(state) });
   if (!state.hasStreamedToken && answer) {
-    process.stdout.write(`\n💬 Agent Response:\n${answer}\n`);
+    process.stdout.write(`\n💬 Agent Response:\n${renderMarkdown(answer)}\n`);
   }
   process.stdout.write('\n');
 };

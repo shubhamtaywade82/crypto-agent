@@ -73,3 +73,37 @@ describe('Trading Agent Harness with Built-in Binance Tools & Agent', () => {
     expect(answer).toBe('No response from agent.');
   });
 });
+
+describe('UI Formatters & Markdown Renderer', () => {
+  it('formats tool arguments into a single compact string', async () => {
+    const { formatToolArgs } = await import('../src/ui/App.js');
+    expect(formatToolArgs({})).toBe('');
+    expect(formatToolArgs({ symbol: 'SOLUSDT' })).toBe('{"symbol":"SOLUSDT"}');
+    const longArgs = { symbol: 'BTCUSDT', extra: 'a'.repeat(60) };
+    expect(formatToolArgs(longArgs).length).toBeLessThanOrEqual(50);
+  });
+
+  it('formats tool results compactly on a single line without newlines', async () => {
+    const { formatToolResult } = await import('../src/ui/App.js');
+    const arrayResult = JSON.stringify([{ id: 1 }, { id: 2 }, { id: 3 }]);
+    expect(formatToolResult(arrayResult)).toBe('[3 items]');
+
+    const objResult = JSON.stringify({ symbol: 'SOLUSDT', price: '106.50' }, null, 2);
+    expect(formatToolResult(objResult)).not.toContain('\n');
+    expect(formatToolResult(objResult)).toContain('SOLUSDT');
+
+    const errResult = JSON.stringify({ error: 'Rate limit exceeded' });
+    expect(formatToolResult(errResult)).toBe('Error: Rate limit exceeded');
+  });
+
+  it('renders markdown tables and styled text with terminal formatting', async () => {
+    const { renderMarkdown } = await import('../src/ui/App.js');
+    const md = '# Title\n\n| Col A | Col B |\n|---|---|\n| Val 1 | Val 2 |\n\n**BoldText**';
+    const rendered = renderMarkdown(md);
+    expect(rendered).toContain('Title');
+    expect(rendered).toContain('┌');
+    expect(rendered).toContain('Val 1');
+    expect(rendered).not.toContain('**BoldText**');
+    expect(rendered).toContain('BoldText');
+  });
+});

@@ -1,13 +1,57 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
+import { marked, Renderer } from 'marked';
+import TerminalRenderer from 'marked-terminal';
 import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 import { runTradingAgent } from '../agent.js';
 import { binanceRateLimiter } from '../guardians/rate-limiter.js';
 import { defaultModel } from '../config.js';
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
+const terminalRenderer = new TerminalRenderer({ showSectionPrefix: false, tab: 2 }) as unknown as InstanceType<
+  typeof Renderer
+> & { text: (token: unknown) => string; parser: { parseInline: (t: unknown) => string }; o: { text: (t: unknown) => string } };
 
-interface ToolEntry {
+// marked-terminal misses inner tokens on text tokens in marked v15 tight lists
+terminalRenderer.text = function (token: unknown): string {
+  const hasTokens = token && typeof token === 'object' && 'tokens' in token && token.tokens;
+  if (hasTokens) return this.parser.parseInline((token as { tokens: unknown }).tokens);
+  return this.o.text(typeof token === 'object' && token && 'text' in token ? (token as { text: unknown }).text : token);
+};
+
+marked.setOptions({ renderer: terminalRenderer as unknown as InstanceType<typeof Renderer> });
+
+export const renderMarkdown = (text: string): string => {
+  if (!text) return '';
+  try {
+    return (marked.parse(text) as string).trim();
+  } catch {
+    return text;
+  }
+};
+
+export const formatToolArgs = (args: unknown): string => {
+  if (!args || (typeof args === 'object' && Object.keys(args).length === 0)) return '';
+  const str = typeof args === 'string' ? args : JSON.stringify(args);
+  const flattened = str.replace(/\s+/g, ' ').trim();
+  return flattened.length > 50 ? `${flattened.slice(0, 47)}...` : flattened;
+};
+
+export const formatToolResult = (raw: string): string => {
+  const flat = raw.replace(/\s+/g, ' ').trim();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return `[${parsed.length} items]`;
+    if (parsed && typeof parsed === 'object') {
+      if ('error' in parsed) return `Error: ${String((parsed as Record<string, unknown>).error)}`;
+      const compact = JSON.stringify(parsed);
+      return compact.length > 70 ? `${compact.slice(0, 67)}...` : compact;
+    }
+  } catch { /* fallback to flat string */ }
+  return flat.length > 70 ? `${flat.slice(0, 67)}...` : flat;
+};
+
+export interface ToolEntry {
+  id?: string;
   name: string;
   args: unknown;
   result?: string;
@@ -21,6 +65,31 @@ interface ChatMessage {
   tools?: ToolEntry[];
 }
 
+interface TurnCollector {
+  thoughts: string;
+  tools: ToolEntry[];
+}
+
+interface ChatHandlers {
+  collector: TurnCollector;
+  setStatus: (s: string) => void;
+  setThoughts: React.Dispatch<React.SetStateAction<string>>;
+  setTools: React.Dispatch<React.SetStateAction<ToolEntry[]>>;
+  setResponse: React.Dispatch<React.SetStateAction<string>>;
+}
+
+interface AgentChatState {
+  messages: ChatMessage[];
+  isBusy: boolean;
+  status: string;
+  thoughts: string;
+  tools: ToolEntry[];
+  response: string;
+  sendMessage: (prompt: string) => Promise<void>;
+}
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
+
 const useSpinner = (active: boolean): string => {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
@@ -31,19 +100,16 @@ const useSpinner = (active: boolean): string => {
   return SPINNER_FRAMES[frame] ?? '⠋';
 };
 
-const Header = (): React.JSX.Element => {
-  const weight = binanceRateLimiter.getCurrentWeight();
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
-      <Text bold color="cyan">🤖 Crypto Agent — Autonomous ReAct Trading Terminal</Text>
-      <Box gap={2}>
-        <Text color="gray">Model: <Text color="yellow">{defaultModel}</Text></Text>
-        <Text color="gray">Env: <Text color="green">paper-broker</Text></Text>
-        <Text color="gray">Rate Limit: <Text color="magenta">{weight}/1200</Text></Text>
-      </Box>
+const Header = (): React.JSX.Element => (
+  <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
+    <Text bold color="cyan">🤖 Crypto Agent — Autonomous ReAct Trading Terminal</Text>
+    <Box gap={2}>
+      <Text color="gray">Model: <Text color="yellow">{defaultModel}</Text></Text>
+      <Text color="gray">Env: <Text color="green">paper-broker</Text></Text>
+      <Text color="gray">Rate Limit: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
     </Box>
-  );
-};
+  </Box>
+);
 
 const MessageHistory = ({ messages }: { messages: ChatMessage[] }): React.JSX.Element => (
   <Box flexDirection="column">
@@ -60,10 +126,13 @@ const MessageHistory = ({ messages }: { messages: ChatMessage[] }): React.JSX.El
             )}
             {m.tools?.map((t, idx) => (
               <Text key={`${t.name}-${idx}`} color="green">
-                🛠️ {t.name}({JSON.stringify(t.args)}) {t.result ? `-> ${t.result}...` : ''}
+                🛠️ {t.name}({formatToolArgs(t.args)}) {t.result ? `→ ${t.result}` : ''}
               </Text>
             ))}
-            <Text bold color="cyan">💬 Agent: {m.content}</Text>
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold color="cyan">💬 Agent:</Text>
+              <Text>{renderMarkdown(m.content)}</Text>
+            </Box>
           </Box>
         )}
       </Box>
@@ -93,10 +162,15 @@ const LiveTurn = ({ busy, status, thoughts, tools, response }: LiveTurnProps): R
       )}
       {tools.map((t, idx) => (
         <Text key={`live-${t.name}-${idx}`} color="green">
-          🛠️ {t.name}({JSON.stringify(t.args)}) {t.result ? `-> ${t.result}...` : ''}
+          🛠️ {t.name}({formatToolArgs(t.args)}) {t.result ? `→ ${t.result}` : '...'}
         </Text>
       ))}
-      {response.length > 0 && <Text color="cyan">💬 Agent: {response}</Text>}
+      {response.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color="cyan">💬 Agent:</Text>
+          <Text>{renderMarkdown(response)}</Text>
+        </Box>
+      )}
     </Box>
   );
 };
@@ -112,18 +186,11 @@ const PromptInput = ({ value, busy, onSubmit, onChange }: InputProps): React.JSX
   const { exit } = useApp();
 
   useInput((input, key) => {
-    if (key.ctrl && (input === 'c' || input === '\u0003')) {
-      exit();
-      return;
-    }
-    if (busy) return;
-    if (key.return) {
-      onSubmit();
-    } else if (key.backspace || key.delete) {
-      onChange(value.slice(0, -1));
-    } else if (!key.ctrl && !key.meta && input) {
-      onChange(value + input);
-    }
+    if (key.ctrl && (input === 'c' || input === '\u0003')) exit();
+    else if (busy) return;
+    else if (key.return) onSubmit();
+    else if (key.backspace || key.delete) onChange(value.slice(0, -1));
+    else if (!key.ctrl && !key.meta && input) onChange(value + input);
   });
 
   return (
@@ -135,26 +202,23 @@ const PromptInput = ({ value, busy, onSubmit, onChange }: InputProps): React.JSX
   );
 };
 
-interface ChatHandlers {
-  setStatus: (s: string) => void;
-  setThoughts: React.Dispatch<React.SetStateAction<string>>;
-  setTools: React.Dispatch<React.SetStateAction<ToolEntry[]>>;
-  setResponse: React.Dispatch<React.SetStateAction<string>>;
-}
-
 const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
   onThinking: (chunk: string): void => {
+    handlers.collector.thoughts += chunk;
     handlers.setStatus('Reasoning...');
     handlers.setThoughts((prev) => prev + chunk);
   },
   onToolCallStart: (call): void => {
+    handlers.collector.tools.push({ id: call.id, name: call.function.name, args: call.function.arguments });
     handlers.setStatus(`Calling ${call.function.name}...`);
-    handlers.setTools((prev) => [...prev, { name: call.function.name, args: call.function.arguments }]);
+    handlers.setTools([...handlers.collector.tools]);
   },
   onToolCallEnd: (res): void => {
-    handlers.setTools((prev) =>
-      prev.map((t, idx) => (idx === prev.length - 1 ? { ...t, result: res.outputString.slice(0, 60) } : t))
+    const target = handlers.collector.tools.find(
+      (t) => (res.toolCallId ? t.id === res.toolCallId : t.name === res.toolName && !t.result)
     );
+    if (target) target.result = formatToolResult(res.outputString);
+    handlers.setTools([...handlers.collector.tools]);
   },
   onToken: (token: string): void => {
     handlers.setStatus('Responding...');
@@ -162,15 +226,7 @@ const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
   },
 });
 
-const useAgentChat = (): {
-  messages: ChatMessage[];
-  isBusy: boolean;
-  status: string;
-  thoughts: string;
-  tools: ToolEntry[];
-  response: string;
-  sendMessage: (prompt: string) => Promise<void>;
-} => {
+const useAgentChat = (): AgentChatState => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState('Idle');
@@ -179,6 +235,7 @@ const useAgentChat = (): {
   const [response, setResponse] = useState('');
 
   const sendMessage = useCallback(async (text: string): Promise<void> => {
+    const collector: TurnCollector = { thoughts: '', tools: [] };
     setIsBusy(true);
     setStatus('Thinking with ReAct...');
     setThoughts('');
@@ -186,13 +243,16 @@ const useAgentChat = (): {
     setResponse('');
     setMessages((prev) => [...prev, { id: String(Date.now()), role: 'user', content: text }]);
 
-    const hooks = createLiveHooks({ setStatus, setThoughts, setTools, setResponse });
+    const hooks = createLiveHooks({ collector, setStatus, setThoughts, setTools, setResponse });
     const answer = await runTradingAgent(text, { hooks });
 
-    setMessages((prev) => [...prev, { id: String(Date.now()), role: 'agent', content: answer, thoughts, tools }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: String(Date.now()), role: 'agent', content: answer, thoughts: collector.thoughts, tools: [...collector.tools] },
+    ]);
     setIsBusy(false);
     setStatus('Idle');
-  }, [thoughts, tools]);
+  }, []);
 
   return { messages, isBusy, status, thoughts, tools, response, sendMessage };
 };
