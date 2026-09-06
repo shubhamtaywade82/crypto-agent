@@ -1,7 +1,10 @@
 import 'dotenv/config';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import React from 'react';
+import { render } from 'ink';
 import { runTradingAgent } from './agent.js';
+import { App } from './ui/App.js';
 
 import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 
@@ -20,10 +23,6 @@ const printToolEnd = (name: string, outputString: string): void => {
   process.stdout.write(`📦 Result: \x1b[32m${name}\x1b[0m -> ${formatPreview(outputString)}...\n`);
 };
 
-const printThought = (thought: string): void => {
-  process.stdout.write(`\n🧠 Thought:\n\x1b[90m${thought.trim()}\x1b[0m\n`);
-};
-
 const createCliHooks = (state: CliHookState): AgentHooks => {
   let isThinking = false;
 
@@ -32,6 +31,14 @@ const createCliHooks = (state: CliHookState): AgentHooks => {
       process.stdout.write('\x1b[0m\n');
       isThinking = false;
     }
+  };
+
+  const handleThinking = (chunk: string): void => {
+    if (!isThinking) {
+      process.stdout.write('\n🧠 Thought:\n\x1b[90m');
+      isThinking = true;
+    }
+    process.stdout.write(chunk);
   };
 
   const handleToken = (token: string): void => {
@@ -44,15 +51,13 @@ const createCliHooks = (state: CliHookState): AgentHooks => {
   };
 
   return {
+    onThinking: handleThinking,
     onToolCallStart: (call): void => {
       resetThinking();
       printToolStart(call.function.name, call.function.arguments);
     },
     onToolCallEnd: (res): void => printToolEnd(res.toolName, res.outputString),
-    onTurnEnd: (turn): void => {
-      resetThinking();
-      if (turn.message.thinking) printThought(turn.message.thinking);
-    },
+    onTurnEnd: resetThinking,
     onToken: handleToken,
   };
 };
@@ -67,21 +72,16 @@ const executeWithStreaming = async (prompt: string): Promise<void> => {
 };
 
 const startInteractiveRepl = async (): Promise<void> => {
+  if (process.stdin.isTTY) {
+    const { waitUntilExit } = render(React.createElement(App));
+    await waitUntilExit();
+    return;
+  }
   const rl = readline.createInterface({ input, output });
-  output.write('\n🤖 Crypto Agent Interactive Terminal (type "exit" to quit)\n');
-
-  try {
-    while (true) {
-      const prompt = (await rl.question('\n💬 You > ')).trim();
-      if (!prompt) continue;
-      if (prompt.toLowerCase() === 'exit' || prompt.toLowerCase() === 'quit') {
-        output.write('👋 Exiting Crypto Agent.\n');
-        break;
-      }
-      await executeWithStreaming(prompt);
-    }
-  } finally {
-    rl.close();
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === 'exit' || trimmed === 'quit') break;
+    await executeWithStreaming(trimmed);
   }
 };
 

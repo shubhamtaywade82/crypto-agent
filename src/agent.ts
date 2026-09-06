@@ -1,4 +1,12 @@
-import { Agent, OllamaClient, type AgentHooks } from '@nemesis-oss/ollama-sdk';
+import {
+  OllamaClient,
+  type AgentHooks,
+  type Message,
+  type ToolCall,
+  type ToolDefinition,
+  type ToolExecutionResult,
+  type ToolRegistry,
+} from '@nemesis-oss/ollama-sdk';
 import type { BinanceClient } from '@nemesis-oss/binance-sdk';
 import { binanceClient, defaultModel, ollamaClient } from './config.js';
 import { createTradingRegistry } from './tools.js';
@@ -23,28 +31,22 @@ const SYSTEM_PROMPT =
   'All Binance access is public market data only (no private keys required). ' +
   'Always reason step-by-step and verify data before executing trades.';
 
-export const runTradingAgent = async (
-  userPrompt: string,
-  options: TradingAgentOptions = {}
-): Promise<string> => {
-  const ollama = options.ollama ?? ollamaClient;
-  const binance = options.binance ?? binanceClient;
-  const registry = createTradingRegistry(binance, options.tools);
+interface StreamTurnOptions {
+  readonly ollama: OllamaClient;
+  readonly model: string;
+  readonly history: Message[];
+  readonly toolDefs: readonly ToolDefinition[] | undefined;
+  readonly think: boolean | 'low' | 'medium' | 'high' | 'max';
+  readonly hooks?: AgentHooks | undefined;
+}
 
-  const agent = new Agent(ollama, {
-    tools: registry,
-    maxIterations: options.maxIterations ?? 15,
-    hooks: options.hooks,
-  });
-
-  const response = await agent.run({
-    model: options.model ?? defaultModel,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt },
-    ],
-    // Passes reasoning flag directly to SDK turn loop
-    think: options.think ?? 'high',
+const streamSingleTurn = async (opts: StreamTurnOptions): Promise<Message> => {
+  const response = await opts.ollama.chat({
+    model: opts.model,
+    messages: opts.history,
+    ...(opts.toolDefs && opts.toolDefs.length > 0 ? { tools: opts.toolDefs } : {}),
+    think: opts.think,
+    stream: true,
     options: {
       temperature: 0.2,
       num_ctx: 32768,
@@ -55,7 +57,84 @@ export const runTradingAgent = async (
     },
   });
 
-  return response.finalMessage.content || 'No response from agent.';
+  if ('finalResult' in response) {
+    for await (const event of response) {
+      if (event.type === 'token') opts.hooks?.onToken?.(event.data.delta);
+      else if (event.type === 'thinking') opts.hooks?.onThinking?.(event.data.delta);
+    }
+    const final = await response.finalResult;
+    return final.message;
+  }
+  return (response as unknown as { message: Message }).message;
+};
+
+const executeToolCallsStep = async (
+  registry: ToolRegistry,
+  toolCalls: readonly ToolCall[],
+  history: Message[],
+  hooks?: AgentHooks
+): Promise<ToolExecutionResult[]> => {
+  for (const call of toolCalls) hooks?.onToolCallStart?.(call);
+  const results = await registry.executeToolCalls(toolCalls);
+  for (const res of results) {
+    hooks?.onToolCallEnd?.(res);
+    history.push({
+      role: 'tool',
+      ...(res.toolCallId !== undefined ? { tool_call_id: res.toolCallId } : {}),
+      content: res.outputString,
+    });
+  }
+  return results;
+};
+
+const executeReActLoop = async (
+  ollama: OllamaClient,
+  registry: ToolRegistry,
+  options: TradingAgentOptions,
+  messages: Message[]
+): Promise<string> => {
+  const history = [...messages];
+  const maxIterations = options.maxIterations ?? 15;
+  const toolDefs = registry.definitions();
+
+  for (let iteration = 1; iteration <= maxIterations; iteration++) {
+    options.hooks?.onTurnStart?.(iteration);
+    const assistantMessage = await streamSingleTurn({
+      ollama,
+      model: options.model ?? defaultModel,
+      history,
+      toolDefs: toolDefs.length > 0 ? toolDefs : undefined,
+      think: options.think ?? 'high',
+      hooks: options.hooks,
+    });
+
+    history.push(assistantMessage);
+    const toolCalls = assistantMessage.tool_calls;
+
+    if (!toolCalls || toolCalls.length === 0) {
+      options.hooks?.onTurnEnd?.({ iteration, message: assistantMessage });
+      return assistantMessage.content || 'No response from agent.';
+    }
+
+    const results = await executeToolCallsStep(registry, toolCalls, history, options.hooks);
+    options.hooks?.onTurnEnd?.({ iteration, message: assistantMessage, toolCalls, toolResults: results });
+  }
+
+  return 'Agent reached maximum iterations without converging.';
+};
+
+export const runTradingAgent = async (
+  userPrompt: string,
+  options: TradingAgentOptions = {}
+): Promise<string> => {
+  const ollama = options.ollama ?? ollamaClient;
+  const binance = options.binance ?? binanceClient;
+  const registry = createTradingRegistry(binance, options.tools);
+
+  return executeReActLoop(ollama, registry, options, [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: userPrompt },
+  ]);
 };
 
 export const runAgent = runTradingAgent;

@@ -23,10 +23,13 @@
     "decimal.js": "^10.4.3",
     "dotenv": "^16.4.5",
     "hono": "^4.13.7",
+    "ink": "^7.1.1",
+    "react": "^19.2.8",
     "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
+    "@types/react": "^19.2.18",
     "eslint": "^9.20.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
