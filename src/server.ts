@@ -115,9 +115,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
 app.get('/', (c) => c.html(DASHBOARD_HTML));
 
-const port = Number(process.env.PORT ?? 3001);
-// Standalone boot when file is run directly via CLI
-if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
+const port = Number(process.env.PORT ?? 3002);
+// Standalone boot when file is run directly via CLI (not imported in tests)
+const isDirectExecution =
+  Boolean(process.argv[1]) &&
+  !process.argv[1].includes('vitest') &&
+  (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js'));
+
+if (isDirectExecution) {
   process.stdout.write(`🚀 Crypto Agent Hono server listening on http://localhost:${port}\n`);
   serve({ fetch: app.fetch, port });
 }

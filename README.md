@@ -13,7 +13,7 @@ Autonomous ReAct crypto trading agent powered by `gemma4:31b` via `@nemesis-oss/
 
 ```mermaid
 graph TD
-    Client["Browser / TradingView UI"] <-->|REST / SSE| Hono["Hono Web Server (:3001)"]
+    Client["Browser / TradingView UI"] <-->|REST / SSE| Hono["Hono Web Server (:3002)"]
     Hono <-->|Agent Loop| Agent["ReAct Agent (gemma4:31b)"]
     Agent <-->|Tool Execution| Registry["Tool Registry"]
     
@@ -51,7 +51,7 @@ Start the entire stack (Ollama + Crypto Agent) with a single command:
 docker compose up --build -d
 ```
 
-Access the TradingView dashboard and agent chat at `http://localhost:3001`.
+Access the TradingView dashboard and agent chat at `http://localhost:3002`.
 
 ### 2. Local Development
 
