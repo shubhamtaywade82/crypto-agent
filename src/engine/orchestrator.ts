@@ -4,6 +4,7 @@ import { sendTelegramAlert, sendTelegramStatus } from '../notifications/telegram
 import type { WatchCondition, WatchTriggerEvent, WatcherStatus } from '../types.js';
 
 type TriggerListener = (event: WatchTriggerEvent, analysis: string) => void;
+type TickListener = (symbol: string, price: number) => void;
 
 /**
  * Orchestrates the full pipeline:
@@ -17,6 +18,7 @@ type TriggerListener = (event: WatchTriggerEvent, analysis: string) => void;
 export class WatchOrchestrator {
   private readonly watcher: PriceWatcher;
   private readonly listeners = new Set<TriggerListener>();
+  private readonly tickListeners = new Set<TickListener>();
   private processing = false;
 
   constructor(baseStreamUrl?: string) {
@@ -27,6 +29,9 @@ export class WatchOrchestrator {
     this.watcher.start();
     this.watcher.on('trigger', (event: WatchTriggerEvent) => {
       void this.handleTrigger(event);
+    });
+    this.watcher.on('tick', (tick: { symbol: string; price: number }) => {
+      for (const listener of this.tickListeners) listener(tick.symbol, tick.price);
     });
     this.watcher.on('connected', () => {
       void sendTelegramStatus('📡 Price watcher connected to Binance WebSocket');
@@ -52,9 +57,14 @@ export class WatchOrchestrator {
     this.listeners.add(listener);
   }
 
+  onTick(listener: TickListener): void {
+    this.tickListeners.add(listener);
+  }
+
   stop(): void {
     this.watcher.stop();
     this.listeners.clear();
+    this.tickListeners.clear();
   }
 
   private async handleTrigger(event: WatchTriggerEvent): Promise<void> {

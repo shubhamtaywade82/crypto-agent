@@ -6,6 +6,7 @@ vi.mock('@nemesis-oss/binance-sdk', async () => {
     subscribe = vi.fn();
     close = vi.fn();
     miniTicker(symbol: string): string { return `${symbol.toLowerCase()}@miniTicker`; }
+    trade(symbol: string): string { return `${symbol.toLowerCase()}@trade`; }
   }
   return { SpotMarketWS: MockSpotMarketWS };
 });
@@ -115,6 +116,30 @@ describe('PriceWatcher', () => {
 
     watcher.removeWatch('test-1');
     expect(watcher.getStatuses()).toHaveLength(0);
+    watcher.stop();
+  });
+
+  it('updates and returns currentPrice when tick arrives', async () => {
+    const { EventEmitter } = await import('node:events');
+    const watcher = new PriceWatcher();
+    watcher.start();
+    watcher.addWatch({
+      id: 'test-tick',
+      symbol: 'SOLUSDT',
+      strategy: 'Test',
+      type: 'price_above',
+      targetPrice: 120,
+      cooldownMs: 5000,
+      createdAt: Date.now(),
+      reEvaluationPrompt: 'check',
+    });
+
+    expect(watcher.getStatuses()[0]?.currentPrice).toBeUndefined();
+
+    const ws = (watcher as unknown as { ws: InstanceType<typeof EventEmitter> }).ws;
+    ws.emit('message', 'solusdt@miniTicker', { s: 'SOLUSDT', c: '108.25' });
+
+    expect(watcher.getStatuses()[0]?.currentPrice).toBe(108.25);
     watcher.stop();
   });
 });

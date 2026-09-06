@@ -180,7 +180,7 @@ const PromptInput = ({
   });
   return (
     <Box borderStyle="single" borderColor={busy ? 'gray' : 'green'} paddingX={1}>
-      <Text bold color={busy ? 'gray' : 'green'}>💬 You &gt; </Text>
+      <Text bold color={busy ? 'gray' : 'green'}>&gt; </Text>
       <Text>{value}</Text>
       {!busy && <Text color="green">█</Text>}
     </Box>

@@ -11,13 +11,20 @@ const formatTriggerTime = (ts: number): string =>
 const directionIcon = (type: string): string =>
   type === 'price_above' ? '📈' : '📉';
 
+const formatDistance = (current: number, target: number): string => {
+  const pct = ((target - current) / current) * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(2)}%`;
+};
+
 const useWatcherData = (orchestrator: WatchOrchestrator): { statuses: WatcherStatus[]; triggers: TriggerLog[] } => {
   const [statuses, setStatuses] = useState<WatcherStatus[]>([]);
   const [triggers, setTriggers] = useState<TriggerLog[]>([]);
 
   useEffect(() => {
     setStatuses(orchestrator.getStatuses());
-    const poll = setInterval(() => setStatuses(orchestrator.getStatuses()), 2000);
+    orchestrator.onTick(() => setStatuses(orchestrator.getStatuses()));
+    const poll = setInterval(() => setStatuses(orchestrator.getStatuses()), 1000);
     const onTrigger = (event: WatchTriggerEvent): void => {
       const log: TriggerLog = {
         symbol: event.condition.symbol,
@@ -33,15 +40,36 @@ const useWatcherData = (orchestrator: WatchOrchestrator): { statuses: WatcherSta
   return { statuses, triggers };
 };
 
+const WatchItem = ({ w }: { w: WatcherStatus }): React.JSX.Element => {
+  const isClose = w.currentPrice !== undefined
+    ? Math.abs((w.targetPrice - w.currentPrice) / w.currentPrice) < 0.005
+    : false;
+
+  return (
+    <Text color="gray">
+      {directionIcon(w.type)} <Text color="cyan">{w.symbol}</Text>{' '}
+      {w.currentPrice !== undefined ? (
+        <Text>
+          <Text color="white">${w.currentPrice.toFixed(2)}</Text>{' '}
+          <Text color="gray">➔</Text>{' '}
+          <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${w.targetPrice}</Text>{' '}
+          <Text color={isClose ? 'red' : 'gray'}>({formatDistance(w.currentPrice, w.targetPrice)})</Text>
+        </Text>
+      ) : (
+        <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${w.targetPrice}</Text>
+      )}
+    </Text>
+  );
+};
+
 const WatchList = ({ statuses }: { statuses: WatcherStatus[] }): React.JSX.Element => (
   <Box flexWrap="wrap" gap={1}>
     <Text color="gray">📡 <Text bold color="yellow">Watches ({statuses.length}):</Text></Text>
     {statuses.map((w, idx) => (
-      <Text key={w.id} color="gray">
+      <Box key={w.id}>
         {idx > 0 && <Text color="gray">│ </Text>}
-        {directionIcon(w.type)} <Text color="cyan">{w.symbol}</Text> {w.type === 'price_above' ? '>' : '<'} <Text color="yellow">${w.targetPrice}</Text>
-        {' '}<Text color={w.isConnected ? 'green' : 'red'}>({w.isConnected ? 'live' : 'offline'})</Text>
-      </Text>
+        <WatchItem w={w} />
+      </Box>
     ))}
   </Box>
 );

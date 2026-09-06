@@ -78,4 +78,5 @@ export interface WatcherStatus {
   readonly targetPrice: number;
   readonly strategy: string;
   readonly isConnected: boolean;
+  readonly currentPrice?: number | undefined;
 }

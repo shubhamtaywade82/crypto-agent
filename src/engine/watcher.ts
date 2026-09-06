@@ -2,10 +2,11 @@ import { EventEmitter } from 'node:events';
 import { SpotMarketWS } from '@nemesis-oss/binance-sdk';
 import type { WatchCondition, WatcherStatus, WatchTriggerEvent } from '../types.js';
 
-// Binance miniTicker payload shape (public, no auth required)
-interface MiniTickerData {
-  readonly s: string;  // symbol
-  readonly c: string;  // close price
+// Binance WS payload shape (supports real-time trade and miniTicker)
+interface WsPriceData {
+  readonly s: string;
+  readonly p?: number | string;
+  readonly c?: number | string;
 }
 
 /**
@@ -24,6 +25,7 @@ export class PriceWatcher extends EventEmitter {
   private readonly conditions = new Map<string, WatchCondition>();
   private readonly lastTrigger = new Map<string, number>();
   private readonly subscribedSymbols = new Set<string>();
+  private readonly latestPrices = new Map<string, number>();
   private connected = false;
 
   constructor(baseStreamUrl?: string) {
@@ -44,7 +46,7 @@ export class PriceWatcher extends EventEmitter {
     });
     this.ws.on('error', (err: Error) => this.emit('error', err));
     this.ws.on('message', (_stream: string, data: unknown) => {
-      this.handleTick(data as MiniTickerData);
+      this.handleTick(data as WsPriceData);
     });
   }
 
@@ -53,7 +55,7 @@ export class PriceWatcher extends EventEmitter {
     const sym = condition.symbol.toUpperCase();
     if (!this.subscribedSymbols.has(sym)) {
       this.subscribedSymbols.add(sym);
-      this.ws.subscribe([this.ws.miniTicker(sym)]);
+      this.ws.subscribe([this.ws.trade(sym)]);
     }
   }
 
@@ -69,6 +71,7 @@ export class PriceWatcher extends EventEmitter {
       targetPrice: c.targetPrice,
       strategy: c.strategy,
       isConnected: this.connected,
+      currentPrice: this.latestPrices.get(c.symbol.toUpperCase()),
     }));
   }
 
@@ -76,14 +79,20 @@ export class PriceWatcher extends EventEmitter {
     this.ws.close();
     this.conditions.clear();
     this.subscribedSymbols.clear();
+    this.latestPrices.clear();
     this.connected = false;
   }
 
-  private handleTick(data: MiniTickerData): void {
-    if (!data?.s || !data?.c) return;
-    const price = parseFloat(data.c);
+  private handleTick(data: WsPriceData): void {
+    if (!data?.s) return;
+    const raw = data.p ?? data.c;
+    if (raw === undefined) return;
+    const price = typeof raw === 'number' ? raw : parseFloat(raw);
     if (Number.isNaN(price)) return;
-    this.evaluateConditions(data.s.toUpperCase(), price);
+    const sym = data.s.toUpperCase();
+    this.latestPrices.set(sym, price);
+    this.emit('tick', { symbol: sym, price });
+    this.evaluateConditions(sym, price);
   }
 
   private evaluateConditions(symbol: string, price: number): void {
