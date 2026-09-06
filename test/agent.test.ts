@@ -96,13 +96,14 @@ describe('UI Formatters & Markdown Renderer', () => {
     expect(formatToolResult(errResult)).toBe('Error: Rate limit exceeded');
   });
 
-  it('renders markdown tables and styled text with terminal formatting', async () => {
+  it('renders markdown tables, horizontal rules, and styled text with terminal formatting', async () => {
     const { renderMarkdown } = await import('../src/ui/App.js');
-    const md = '# Title\n\n| Col A | Col B |\n|---|---|\n| Val 1 | Val 2 |\n\n**BoldText**';
+    const md = '# Title\n\n| Col A | Col B |\n|---|---|\n| Val 1 | Val 2 |\n\n---\n\n**BoldText**';
     const rendered = renderMarkdown(md);
     expect(rendered).toContain('Title');
     expect(rendered).toContain('┌');
     expect(rendered).toContain('Val 1');
+    expect(rendered).toContain('─');
     expect(rendered).not.toContain('**BoldText**');
     expect(rendered).toContain('BoldText');
   });

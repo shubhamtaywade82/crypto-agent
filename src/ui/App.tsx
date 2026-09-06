@@ -17,6 +17,12 @@ terminalRenderer.text = function (tok: unknown): string {
   return this.o.text(typeof tok === 'object' && tok && 'text' in tok ? (tok as { text: unknown }).text : tok);
 };
 
+// Override hr to prevent 1-character wrap in Ink's padded container
+terminalRenderer.hr = (): string => {
+  const cols = process.stdout.columns || 80;
+  return `\n${'─'.repeat(Math.max(20, cols - 4))}\n\n`;
+};
+
 marked.setOptions({ renderer: terminalRenderer as unknown as InstanceType<typeof Renderer> });
 
 export const renderMarkdown = (text: string): string => {
@@ -81,19 +87,11 @@ interface AgentChatState {
 }
 
 interface LiveTurnProps {
-  busy: boolean;
-  status: string;
-  steps: AgentStep[];
-  response: string;
-  collapsed: boolean;
+  busy: boolean; status: string; steps: AgentStep[]; response: string; collapsed: boolean;
 }
 
 interface InputProps {
-  value: string;
-  busy: boolean;
-  onSubmit: () => void;
-  onChange: (val: string) => void;
-  onToggleCollapse: () => void;
+  value: string; busy: boolean; onSubmit: () => void; onChange: (val: string) => void; onToggleCollapse: () => void;
 }
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
