@@ -3,22 +3,21 @@ import type { OllamaClient } from '@nemesis-oss/ollama-sdk';
 import type { BinanceClient } from '@nemesis-oss/binance-sdk';
 import { runTradingAgent } from '../src/agent.js';
 
-describe('Trading Agent Harness with Agent and ToolRegistry', () => {
+describe('Trading Agent Harness with Built-in Binance Tools & Agent', () => {
   const mockBinance = {
     spot: {
       market: {
-        ticker24hr: vi.fn().mockResolvedValue({
-          lastPrice: '67000.00',
-          priceChangePercent: '3.10',
-          quoteVolume: '500000.00',
+        tickerPrice: vi.fn().mockResolvedValue({
+          symbol: 'BTCUSDT',
+          price: '80000.00',
         }),
       },
     },
   } as unknown as BinanceClient;
 
-  it('runs multi-turn tool execution and returns agent final message', async () => {
-    // Turn 1: model decides to call get_price
-    // Turn 2: model processes tool output and delivers final conclusion
+  it('executes adapted spot_ticker_price tool and completes ReAct turn', async () => {
+    // Turn 1: model triggers spot_ticker_price
+    // Turn 2: model processes response and outputs conclusion
     const mockChat = vi
       .fn()
       .mockResolvedValueOnce({
@@ -27,9 +26,9 @@ describe('Trading Agent Harness with Agent and ToolRegistry', () => {
           content: '',
           tool_calls: [
             {
-              id: 'call_get_price_1',
+              id: 'call_spot_ticker_1',
               function: {
-                name: 'get_price',
+                name: 'spot_ticker_price',
                 arguments: { symbol: 'BTCUSDT' },
               },
             },
@@ -39,23 +38,24 @@ describe('Trading Agent Harness with Agent and ToolRegistry', () => {
       .mockResolvedValueOnce({
         message: {
           role: 'assistant',
-          content: 'BTCUSDT is at $67,000.00 (+3.10% 24h).',
+          content: 'Bitcoin is trading at 80000.00 USDT.',
         },
       });
 
     const mockOllama = { chat: mockChat } as unknown as OllamaClient;
 
-    const answer = await runTradingAgent('What is BTC price?', {
+    const answer = await runTradingAgent('What is the current BTC price?', {
       ollama: mockOllama,
       binance: mockBinance,
       model: 'gemma4:cloud',
+      tools: ['spot_ticker_price'],
     });
 
-    expect(answer).toBe('BTCUSDT is at $67,000.00 (+3.10% 24h).');
+    expect(answer).toBe('Bitcoin is trading at 80000.00 USDT.');
     expect(mockChat).toHaveBeenCalledTimes(2);
   });
 
-  it('handles empty response gracefully', async () => {
+  it('handles empty response gracefully with fallback string', async () => {
     const mockChat = vi.fn().mockResolvedValueOnce({
       message: {
         role: 'assistant',

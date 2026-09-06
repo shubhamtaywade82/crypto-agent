@@ -1,118 +1,19 @@
 import { Decimal } from 'decimal.js';
 import { z } from 'zod';
 import { defineTool, ToolRegistry, type AnyTool } from '@nemesis-oss/ollama-sdk';
-import type { BinanceClient } from '@nemesis-oss/binance-sdk';
+import {
+  spotTools,
+  type BinanceClient,
+  type ToolContext,
+  type ToolDefinition as BinanceToolDefinition,
+} from '@nemesis-oss/binance-sdk';
 
-export const createPriceTool = (binance: BinanceClient): AnyTool =>
+export const adaptBinanceTool = (tool: BinanceToolDefinition, ctx: ToolContext): AnyTool =>
   defineTool({
-    name: 'get_price',
-    description: 'Fetch current 24h ticker price, volume, and percent change from Binance',
-    schema: z.object({
-      symbol: z.string().describe('Trading pair symbol, e.g. BTCUSDT'),
-    }),
-    execute: async ({ symbol }) => {
-      const cleanSymbol = symbol.toUpperCase().replace('/', '');
-      const ticker = await binance.spot.market.ticker24hr(cleanSymbol);
-      return {
-        symbol: cleanSymbol,
-        price: ticker.lastPrice,
-        change24h: ticker.priceChangePercent,
-        volume: ticker.quoteVolume,
-        timestamp: Date.now(),
-      };
-    },
-  });
-
-export const createKlinesTool = (binance: BinanceClient): AnyTool =>
-  defineTool({
-    name: 'get_klines',
-    description: 'Fetch OHLCV candlestick data for trend analysis',
-    schema: z.object({
-      symbol: z.string().describe('Trading pair symbol, e.g. BTCUSDT'),
-      interval: z.enum(['1m', '5m', '15m', '1h', '4h', '1d']).default('1h'),
-      limit: z.number().min(1).max(500).default(50),
-    }),
-    execute: async ({ symbol, interval, limit }) => {
-      const cleanSymbol = symbol.toUpperCase().replace('/', '');
-      const klines = await binance.spot.market.klines(cleanSymbol, interval, { limit });
-      // Preserve integer UTC milliseconds instead of Date strings for precision
-      return klines.map((k) => ({
-        open: k.open,
-        high: k.high,
-        low: k.low,
-        close: k.close,
-        volume: k.volume,
-        openTime: k.openTime,
-      }));
-    },
-  });
-
-export const createBalanceTool = (binance: BinanceClient): AnyTool =>
-  defineTool({
-    name: 'get_balance',
-    description: 'Fetch current spot account balance for non-zero assets',
-    schema: z.object({}),
-    execute: async () => {
-      const account = await binance.spot.account.account();
-      // Use Decimal comparison to avoid floating-point errors
-      return account.balances
-        .filter((b) => new Decimal(b.free).greaterThan(0) || new Decimal(b.locked).greaterThan(0))
-        .map((b) => ({ asset: b.asset, free: b.free, locked: b.locked }));
-    },
-  });
-
-const placeOrderSchema = z.object({
-  symbol: z.string().describe('Trading pair symbol'),
-  side: z.enum(['BUY', 'SELL']),
-  quantity: z.string().describe('Order quantity in base asset'),
-  price: z.string().describe('Limit price in quote asset'),
-});
-
-type PlaceOrderInput = z.infer<typeof placeOrderSchema>;
-
-const executePlaceOrder = async (
-  binance: BinanceClient,
-  input: PlaceOrderInput
-): Promise<Record<string, unknown>> => {
-  const cleanSymbol = input.symbol.toUpperCase().replace('/', '');
-  const qty = new Decimal(input.quantity);
-  const px = new Decimal(input.price);
-  if (!qty.greaterThan(0) || !px.greaterThan(0)) {
-    throw new Error('Quantity and price must be strictly positive');
-  }
-
-  // Hard-coded safety ceiling prevents runaway agent losses
-  const maxNotional = new Decimal(process.env.MAX_POSITION_NOTIONAL_USDT ?? '5000');
-  if (qty.times(px).cmp(maxNotional) > 0) {
-    throw new Error(`Order notional exceeds max safety cap of ${maxNotional.toString()} USDT`);
-  }
-
-  const order = await binance.spot.trading.createOrder({
-    symbol: cleanSymbol,
-    side: input.side,
-    type: 'LIMIT',
-    quantity: qty.toString(),
-    price: px.toString(),
-    timeInForce: 'GTC',
-  });
-
-  return {
-    orderId: String(order.orderId),
-    symbol: order.symbol,
-    side: order.side,
-    price: order.price,
-    origQty: order.origQty,
-    status: order.status,
-    timestamp: Date.now(),
-  };
-};
-
-export const createPlaceOrderTool = (binance: BinanceClient): AnyTool =>
-  defineTool({
-    name: 'place_limit_order',
-    description: 'Place a limit order with pre-trade risk checks',
-    schema: placeOrderSchema,
-    execute: async (input) => executePlaceOrder(binance, input),
+    name: tool.name,
+    description: tool.description,
+    schema: tool.inputSchema,
+    execute: async (args) => tool.handler(args, ctx),
   });
 
 const positionSizeSchema = z.object({
@@ -160,15 +61,42 @@ export const createPositionSizeTool = (): AnyTool =>
     execute: async (input) => executePositionSize(input),
   });
 
-export const createTradingRegistry = (binance: BinanceClient): ToolRegistry =>
-  new ToolRegistry({
-    tools: [
-      createPriceTool(binance),
-      createKlinesTool(binance),
-      createBalanceTool(binance),
-      createPlaceOrderTool(binance),
-      createPositionSizeTool(),
-    ],
-    // Prevents network hangs on slow exchange responses
+// Core subset of high-signal tools to avoid LLM context bloat while keeping full analytical power
+export const CORE_SPOT_TOOLS = [
+  'spot_ping',
+  'spot_server_time',
+  'spot_exchange_info',
+  'spot_ticker_price',
+  'spot_ticker_24hr',
+  'spot_book_ticker',
+  'spot_order_book',
+  'spot_recent_trades',
+  'spot_klines',
+  'spot_avg_price',
+  'spot_account',
+  'spot_new_order',
+  'spot_cancel_order',
+  'spot_open_orders',
+] as const;
+
+export const createTradingRegistry = (
+  binance: BinanceClient,
+  selectedTools: readonly string[] = CORE_SPOT_TOOLS
+): ToolRegistry => {
+  const ctx: ToolContext = {
+    env: process.env.BINANCE_TESTNET !== 'false' ? 'testnet' : 'live',
+    isSigned: Boolean(process.env.BINANCE_API_KEY),
+  };
+
+  const rawTools = spotTools(binance);
+  const targetSet = new Set<string>(selectedTools);
+  const adaptedTools = rawTools
+    .filter((t) => targetSet.has(t.name))
+    .map((t) => adaptBinanceTool(t, ctx));
+
+  return new ToolRegistry({
+    tools: [...adaptedTools, createPositionSizeTool()],
+    // Fail fast on slow exchange network responses
     timeoutMs: 15_000,
   });
+};

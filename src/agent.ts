@@ -1,5 +1,6 @@
 import { Agent, OllamaClient } from '@nemesis-oss/ollama-sdk';
-import { BinanceClient, type BinanceClientOptions } from '@nemesis-oss/binance-sdk';
+import type { BinanceClient } from '@nemesis-oss/binance-sdk';
+import { binanceClient, defaultModel, ollamaClient } from './config.js';
 import { createTradingRegistry } from './tools.js';
 
 export interface TradingAgentOptions {
@@ -8,35 +9,26 @@ export interface TradingAgentOptions {
   readonly model?: string | undefined;
   readonly maxIterations?: number | undefined;
   readonly think?: boolean | 'low' | 'medium' | 'high' | 'max' | undefined;
+  readonly tools?: readonly string[] | undefined;
 }
 
 const SYSTEM_PROMPT =
-  'You are a crypto trading assistant with access to Binance market data and order execution. ' +
-  '- Use get_price to check current prices and 24h metrics. ' +
-  '- Use get_klines to analyse recent price action. ' +
-  '- Use get_balance to check available funds. ' +
-  '- Use calculate_position_size before placing any trades. ' +
-  '- Use place_limit_order to execute trades. ' +
-  'Always think step by step. If you need more data before placing an order, fetch it first.';
-
-export const createBinanceClient = (options?: BinanceClientOptions): BinanceClient =>
-  new BinanceClient({
-    apiKey: options?.apiKey ?? process.env.BINANCE_API_KEY,
-    apiSecret: options?.apiSecret ?? process.env.BINANCE_API_SECRET,
-    testnet: options?.testnet ?? (process.env.BINANCE_TESTNET !== 'false'),
-  });
+  'You are a crypto market analyst and execution assistant with direct access to Binance market data. ' +
+  '- Use spot_ticker_price or spot_ticker_24hr for current market stats. ' +
+  '- Use spot_klines for OHLCV candlestick trend analysis. ' +
+  '- Use spot_order_book for liquidity and depth. ' +
+  '- Use spot_account to inspect available balances. ' +
+  '- Use calculate_position_size to compute precise risk-adjusted lot sizes. ' +
+  '- Use spot_new_order to place limit or market orders when requested. ' +
+  'Always reason step-by-step and verify data before executing trades.';
 
 export const runTradingAgent = async (
   userPrompt: string,
   options: TradingAgentOptions = {}
 ): Promise<string> => {
-  const ollama =
-    options.ollama ??
-    new OllamaClient({
-      baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
-    });
-  const binance = options.binance ?? createBinanceClient();
-  const registry = createTradingRegistry(binance);
+  const ollama = options.ollama ?? ollamaClient;
+  const binance = options.binance ?? binanceClient;
+  const registry = createTradingRegistry(binance, options.tools);
 
   const agent = new Agent(ollama, {
     tools: registry,
@@ -44,12 +36,12 @@ export const runTradingAgent = async (
   });
 
   const response = await agent.run({
-    model: options.model ?? process.env.OLLAMA_MODEL ?? 'gemma4:cloud',
+    model: options.model ?? defaultModel,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
-    // First-class SDK option to trigger reasoning stream traces for Gemma 4
+    // Passes reasoning flag directly to SDK turn loop
     think: options.think ?? 'high',
     options: {
       temperature: 0.2,
@@ -59,3 +51,5 @@ export const runTradingAgent = async (
 
   return response.finalMessage.content || 'No response from agent.';
 };
+
+export const runAgent = runTradingAgent;
