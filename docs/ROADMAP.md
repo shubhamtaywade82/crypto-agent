@@ -77,6 +77,10 @@ integrity, portfolio accounting, execution reconciliation truth, and concurrency
       invalidation}`; levels resolved server-side from the canonical candidate
 - [x] `CrossVenueState` domain (basis, spread bps, execution premium, staleness health)
       ready for runtime wiring
+- [x] Restart truth: `ExecutionEngine.hydrate()` rebuilds tracked orders (including
+      UNKNOWN and SUBMITTING) from the event log at boot — a kill -9 mid-submit no
+      longer forgets a live order; the reconciler converges it instead. Duplicate
+      submits of the same decisionId are refused (no double venue order)
 - [x] Pipeline refreshes live portfolio state every run (no more trading on stale/zero
       fallback equity)
 - [x] `CrossVenueState` wired into the live pipeline gate: `CrossVenueGate` reads the
@@ -139,6 +143,9 @@ outputs through the pipeline and assert zero unapproved orders.
       worst-R floor) — gates are frozen at registration, evaluated per cell, and every
       promotion/retirement is a persisted audit event
 - [x] Registry + ledger hydrated at kernel boot; exposed on the kernel API surface
+- [x] Performance analytics: portfolio summary with Sharpe/Sortino over the daily R
+      series, plus segmentation by strategy / symbol / regime and per-cell statistics —
+      served at `GET /api/kernel/analytics` (READ_PORTFOLIO)
 - [ ] Rule candidates → backtest → walk-forward (train/validate/OOS) → paper → promote
 - [ ] Wire journal lessons + strategy status into strategist context
 

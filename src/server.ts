@@ -9,6 +9,7 @@ import { buildMarketState } from './engines/market-state-engine.js';
 import { ApiAuthenticator, auditCaller } from './security/auth.js';
 import type { AuthVariables } from './security/auth.js';
 import type { Capability } from './security/capabilities.js';
+import { analyticsSnapshot } from './learning/performance-analytics.js';
 
 export const app = new Hono<AuthVariables>();
 
@@ -69,6 +70,24 @@ app.get('/api/kernel/killswitch', guard('READ_AUDIT'), (c) => {
     reason: kernel.killSwitch.currentReason,
     actor: kernel.killSwitch.lastActor,
     changedAt: kernel.killSwitch.lastChangedAt,
+  });
+});
+
+app.get('/api/kernel/analytics', guard('READ_PORTFOLIO'), (c) => {
+  const kernel = getKernel();
+  const snapshot = analyticsSnapshot(kernel.ledger.outcomes);
+  const strategies = kernel.strategies.all().map((s) => ({
+    strategyId: s.strategyId,
+    version: s.version,
+    status: s.status,
+    promotedAt: s.promotedAt ?? null,
+    retiredAt: s.retiredAt ?? null,
+    gate: s.gate,
+  }));
+  return c.json({
+    ...snapshot,
+    openTrades: kernel.ledger.openTrades.length,
+    strategies,
   });
 });
 

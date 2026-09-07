@@ -229,6 +229,9 @@ const buildKernelContext = (
 
 /** Fail-safe hydrate + defense-in-depth submission gate. */
 const installSafetyGates = (parts: KernelParts): void => {
+  // Restart truth: rebuild tracked orders (incl. UNKNOWN) from the event
+  // log so the reconciler converges instead of forgetting live orders.
+  parts.execution.hydrate();
   // Unknown/unreadable state stays HALTED (fail-safe default).
   parts.killSwitch.hydrate();
   // The execution engine independently refuses new submissions while

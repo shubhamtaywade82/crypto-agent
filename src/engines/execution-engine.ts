@@ -27,6 +27,69 @@ const SUBMIT_TIMEOUT_MS = 10_000;
  * UNKNOWN path: if submission times out, the order goes UNKNOWN and only
  * the Reconciler may resolve it (never the agent).
  */
+/** States from which an order is never revived on restart. */
+const TERMINAL: ReadonlySet<OrderStatus> = new Set([
+  'CLOSED', 'REJECTED', 'CANCELLED', 'EXPIRED',
+]);
+
+interface HydratedOrder {
+  readonly intentId: string;
+  readonly symbol: string;
+  readonly pair: string;
+  readonly side: 'buy' | 'sell';
+  readonly quantity: number;
+  readonly status: OrderStatus;
+  readonly orderId?: string;
+}
+
+/** Scan the event log into per-decision register + last-transition views. */
+const scanOrderEvents = (
+  source: readonly { at: number; type: string; decisionId?: string; symbol?: string; payload: unknown }[]
+): Map<string, HydratedOrder> => {
+  const registered = new Map<string, { symbol: string; payload: Record<string, unknown> }>();
+  const transitions = new Map<string, { to: OrderStatus; orderId: string | null }[]>();
+  for (const e of source) {
+    const id = e.decisionId;
+    if (!id) continue;
+    if (e.type === 'order.registered') {
+      registered.set(id, { symbol: e.symbol ?? '', payload: e.payload as Record<string, unknown> });
+    } else if (e.type === 'order.transition') {
+      const p = e.payload as { to?: OrderStatus; orderId?: string | null };
+      if (p?.to) {
+        const list = transitions.get(id) ?? [];
+        list.push({ to: p.to, orderId: p.orderId ?? null });
+        transitions.set(id, list);
+      }
+    }
+  }
+  const out = new Map<string, HydratedOrder>();
+  for (const [id, reg] of registered) {
+    const last = transitions.get(id)?.at(-1);
+    const status: OrderStatus = last ? last.to : 'RISK_APPROVED';
+    if (TERMINAL.has(status)) continue;
+    out.set(id, hydratableOrder(id, reg, status, last));
+  }
+  return out;
+};
+
+// No transitions at all: the crash happened between register and submit
+// (revived as RISK_APPROVED so the flow may retry; NOT_FOUND reconciliation
+// remains the safety net for any borderline case).
+const hydratableOrder = (
+  id: string,
+  reg: { symbol: string; payload: Record<string, unknown> },
+  status: OrderStatus,
+  last: { to: OrderStatus; orderId: string | null } | undefined
+): HydratedOrder => ({
+  intentId: id,
+  symbol: reg.symbol,
+  pair: String(reg.payload?.pair ?? ''),
+  side: reg.payload?.side === 'sell' ? 'sell' : 'buy',
+  quantity: Number(reg.payload?.quantity ?? 0),
+  status,
+  orderId: last?.orderId ?? undefined,
+});
+
 export class ExecutionEngine {
   private readonly broker: IExecutionBroker;
   private readonly store: EventStore;
@@ -83,10 +146,16 @@ export class ExecutionEngine {
     return tracked;
   }
 
-  /** Submit through the broker; resolves UNKNOWN on timeout. */
-  async submit(intentId: string, req: Omit<PlaceOrderRequest, 'intentId'>): Promise<TrackedOrder> {
-    const tracked = this.orders.get(intentId);
-    if (!tracked) throw new Error(`unknown intent ${intentId}`);
+  /** Durability + gate + idempotency checks shared by the submit path. */
+  private assertSubmittable(tracked: TrackedOrder): void {
+    // Idempotency: only a fresh risk-approved intent may be submitted.
+    // A retry while SUBMITTING/SUBMITTED/... would place a SECOND venue
+    // order under the same decisionId (double risk, double fill).
+    if (tracked.status !== 'RISK_APPROVED') {
+      throw new Error(
+        `intent ${tracked.intentId} not submittable in status ${tracked.status}`
+      );
+    }
     // Durability contract: never send an order to the venue while the
     // audit backbone cannot persist its lifecycle.
     if (!this.store.healthy) {
@@ -96,11 +165,18 @@ export class ExecutionEngine {
     const blocked = this.submissionGate?.();
     if (blocked) {
       this.store.appendClassified({
-        type: 'order.blocked', symbol: tracked.symbol, decisionId: intentId,
+        type: 'order.blocked', symbol: tracked.symbol, decisionId: tracked.intentId,
         payload: { reason: blocked },
       });
       throw new Error(`submission blocked: ${blocked}`);
     }
+  }
+
+  /** Submit through the broker; resolves UNKNOWN on timeout. */
+  async submit(intentId: string, req: Omit<PlaceOrderRequest, 'intentId'>): Promise<TrackedOrder> {
+    const tracked = this.orders.get(intentId);
+    if (!tracked) throw new Error(`unknown intent ${intentId}`);
+    this.assertSubmittable(tracked);
     this.transition(tracked, 'SUBMITTING');
     try {
       const placed = await withTimeout(
@@ -149,6 +225,34 @@ export class ExecutionEngine {
       type: 'order.transition', symbol: tracked.symbol, decisionId: tracked.intentId,
       payload: { from, to, orderId: tracked.orderId ?? null },
     });
+  }
+
+  /**
+   * Rebuild tracked orders from the event log (call once at startup).
+   *
+   * Without this, a kill -9 mid-submit restarts into an EMPTY order
+   * book: the reconciler would have nothing to converge and a live
+   * UNKNOWN order would be forgotten by the process that owns it.
+   * Terminal orders (CLOSED/REJECTED/CANCELLED/EXPIRED) are not revived;
+   * everything else — including UNKNOWN and FILLED awaiting position
+   * evidence — is restored for the reconciler to drive to truth.
+   */
+  hydrate(events?: readonly { at: number; type: string; decisionId?: string; symbol?: string; payload: unknown }[]): void {
+    const source = events ?? this.store.readAll(5000);
+    for (const h of scanOrderEvents(source).values()) {
+      this.orders.set(h.intentId, {
+        intentId: h.intentId,
+        pair: h.pair,
+        symbol: h.symbol,
+        side: h.side,
+        quantity: h.quantity,
+        reduceOnly: false,
+        status: h.status,
+        orderId: h.orderId,
+        filledQuantity: 0,
+        updatedAt: Date.now(),
+      });
+    }
   }
 }
 
