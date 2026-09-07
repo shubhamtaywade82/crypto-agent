@@ -12,17 +12,26 @@ import { PortfolioEngine } from './engines/portfolio-engine.js';
 import { ExecutionEngine } from './engines/execution-engine.js';
 import { Reconciler } from './engines/reconciler.js';
 import { SymbolLanes } from './engines/event-bus.js';
-import { runTradingPipeline, type PipelineTrace } from './engines/pipeline.js';
+import { runTradingPipeline, type PipelineTrace, type PipelineDeps, type StrategyRequest } from './engines/pipeline.js';
 import { analyzeMarket } from './agents/analyst-agent.js';
 import { strategize } from './agents/strategist-agent.js';
 import { challengeProposal } from './agents/risk-challenger.js';
+import type { MarketAnalysis, StrategyOutcome, ChallengerVerdict } from './agents/schemas.js';
 import type { TradeProposal } from './domain/orders/trade-proposal.js';
 import type { SizingResult } from './engines/position-sizer.js';
 import type { RiskDecision } from './domain/risk/risk-decision.js';
 import type { TrackedOrder } from './engines/execution-engine.js';
+import { assessProposal } from './engines/pipeline.js';
+import type { MarketState } from './domain/market/types.js';
 import { binanceClient, defaultModel, ollamaClient } from './config.js';
 
 export type ExecutionVenue = 'paper' | 'coindcx';
+
+export interface AssessResult {
+  readonly validation: ReturnType<typeof assessProposal>['validation'];
+  readonly sizing: SizingResult;
+  readonly risk: RiskDecision;
+}
 
 export interface TradingKernel {
   readonly venue: ExecutionVenue;
@@ -37,6 +46,8 @@ export interface TradingKernel {
   readonly store: EventStore;
   readonly log: Logger;
   runPipeline(symbol: string): Promise<PipelineTrace>;
+  assess(proposal: TradeProposal, state: MarketState): AssessResult;
+  executeProposal(proposal: TradeProposal, sizing: SizingResult, risk: RiskDecision): Promise<TrackedOrder>;
 }
 
 const buildBroker = (
@@ -117,32 +128,75 @@ const buildExecutor = (
   };
 };
 
+interface KernelParts {
+  readonly provider: BinanceMarketDataProvider;
+  readonly limits: RiskLimits;
+  readonly portfolio: PortfolioEngine;
+  readonly execution: ExecutionEngine;
+  readonly store: EventStore;
+  readonly challengesEnabled: boolean;
+}
+
+const buildPipelineDeps = (
+  parts: KernelParts,
+  ollama: OllamaClient,
+  router: SymbolRouter | undefined,
+  broker: IExecutionBroker
+): PipelineDeps => {
+  const analyze = (state: MarketState): Promise<MarketAnalysis> =>
+    analyzeMarket(ollama, defaultModel, state);
+  const strategizeFn = (request: StrategyRequest): Promise<StrategyOutcome> =>
+    strategize(ollama, defaultModel, request);
+  const challenge = (proposal: TradeProposal, state: MarketState): Promise<ChallengerVerdict> =>
+    challengeProposal(ollama, defaultModel, proposal, state);
+  return {
+    provider: parts.provider,
+    limits: parts.limits,
+    portfolio: parts.portfolio,
+    execution: parts.execution,
+    store: parts.store,
+    challengesEnabled: parts.challengesEnabled,
+    analyze,
+    strategize: strategizeFn,
+    challenge,
+    execute: buildExecutor(broker, router, parts.execution),
+  };
+};
+
 export const createKernel = (venueOverride?: ExecutionVenue): TradingKernel => {
   const log = createLogger('kernel');
   const venue: ExecutionVenue =
     venueOverride ?? (process.env.EXECUTION_VENUE as ExecutionVenue | undefined) ?? 'paper';
   const { broker, router } = buildBroker(venue, log);
-  const provider = new BinanceMarketDataProvider(binanceClient);
-  const limits = loadRiskLimits();
   const store = new EventStore();
   const execution = new ExecutionEngine(broker, store);
-  const portfolio = new PortfolioEngine({
-    broker, limits, fallbackEquity: Number(process.env.PAPER_INITIAL_FUTURES_BALANCE ?? 10_000),
-  });
-  const reconciler = new Reconciler(broker, execution, store);
-  const challengesEnabled = process.env.RISK_CHALLENGER_ENABLED !== 'false';
-  const ollama: OllamaClient = ollamaClient;
+  const limits = loadRiskLimits();
+  const parts: KernelParts = {
+    provider: new BinanceMarketDataProvider(binanceClient),
+    limits,
+    store,
+    challengesEnabled: process.env.RISK_CHALLENGER_ENABLED !== 'false',
+    execution,
+    portfolio: new PortfolioEngine({
+      broker, limits,
+      fallbackEquity: Number(process.env.PAPER_INITIAL_FUTURES_BALANCE ?? 10_000),
+    }),
+  };
+  const reconciler = new Reconciler(broker, parts.execution, parts.store);
+  const deps = buildPipelineDeps(parts, ollamaClient, router, broker);
+  const assess = (proposal: TradeProposal, state: MarketState): AssessResult =>
+    assessProposal(deps, proposal, state);
+  const executor = deps.execute as NonNullable<typeof deps.execute>;
 
   return {
-    venue, provider, broker, router, limits, portfolio, execution, reconciler,
-    lanes: new SymbolLanes(), store, log,
-    runPipeline: (symbol: string): Promise<PipelineTrace> => runTradingPipeline({
-      provider, limits, portfolio, execution, store, challengesEnabled,
-      analyze: (state) => analyzeMarket(ollama, defaultModel, state),
-      strategize: (request) => strategize(ollama, defaultModel, request),
-      challenge: (proposal, state) => challengeProposal(ollama, defaultModel, proposal, state),
-      execute: buildExecutor(broker, router, execution),
-    }, symbol),
+    venue, provider: parts.provider, broker, router, limits: parts.limits,
+    portfolio: parts.portfolio, execution: parts.execution, reconciler,
+    lanes: new SymbolLanes(), store: parts.store, log,
+    runPipeline: (symbol: string): Promise<PipelineTrace> => runTradingPipeline(deps, symbol),
+    assess,
+    executeProposal: (
+      proposal: TradeProposal, sizing: SizingResult, risk: RiskDecision
+    ): Promise<TrackedOrder> => executor(proposal, sizing, risk),
   };
 };
 

@@ -11,6 +11,20 @@ export { TradeJournal } from './engine/journal.js';
 export { AutonomousScanner, buildScanPrompt } from './engine/scanner.js';
 export { sendTelegramAlert, sendTelegramStatus } from './notifications/telegram.js';
 
+// Trading kernel v2
+export { createKernel, getKernel } from './kernel.js';
+export type { TradingKernel, ExecutionVenue, AssessResult } from './kernel.js';
+export { SymbolLanes } from './engines/event-bus.js';
+export { EventStore } from './infrastructure/events/event-store.js';
+export { loadRiskLimits, DEFAULT_RISK_LIMITS, deriveCircuitState } from './domain/risk/risk-config.js';
+export { evaluateRisk } from './engines/risk-engine.js';
+export { sizePosition } from './engines/position-sizer.js';
+export { validateProposal, computeRr } from './domain/orders/trade-proposal.js';
+export { detectSetups } from './engines/setup-engine.js';
+export { buildMarketState } from './engines/market-state-engine.js';
+export { runTradingPipeline } from './engines/pipeline.js';
+export type { PipelineTrace, PipelineStatus } from './engines/pipeline.js';
+
 const isDirectRun =
   Boolean(process.argv[1]) &&
   fileURLToPath(import.meta.url) === process.argv[1];

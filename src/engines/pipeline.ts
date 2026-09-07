@@ -139,7 +139,8 @@ interface StageArgs {
   readonly setups: readonly SetupCandidate[];
 }
 
-const assessProposal = (
+/** Validate + size + risk-check a proposal against a live market state. */
+export const assessProposal = (
   deps: PipelineDeps,
   proposal: TradeProposal,
   state: MarketState

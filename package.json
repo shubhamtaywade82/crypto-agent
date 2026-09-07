@@ -11,6 +11,7 @@
     "server:start": "node dist/server.js",
     "dev": "tsx src/main.ts",
     "mcp": "tsx src/mcp-server.ts",
+    "kernel": "tsx src/kernel-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"

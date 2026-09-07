@@ -9,6 +9,8 @@ import {
 } from '@nemesis-oss/binance-sdk';
 import { binanceRateLimiter } from './guardians/rate-limiter.js';
 import type { WatchOrchestrator } from './engine/orchestrator.js';
+import type { TradeProposal } from './domain/orders/trade-proposal.js';
+import { buildMarketState } from './engines/market-state-engine.js';
 import {
   createRegisterWatchTool,
   createListWatchesTool,
@@ -20,6 +22,8 @@ import {
   createGetTradeJournalTool,
   createGetLearnedRulesTool,
 } from './engine/journal-tools.js';
+import { createKernelTools } from './tools-kernel.js';
+import { getKernel } from './kernel.js';
 
 export const adaptBinanceTool = (tool: BinanceToolDefinition, ctx: ToolContext): AnyTool =>
   defineTool({
@@ -93,63 +97,85 @@ export const CORE_SPOT_TOOLS = [
 ] as const;
 
 const paperOrderSchema = z.object({
-  symbol: z.string().describe('Trading pair symbol, e.g. BTCUSDT'),
+  symbol: z.string().describe('Trading pair symbol, e.g. SOLUSDT'),
   side: z.enum(['BUY', 'SELL']),
-  quantity: z.string().describe('Order quantity in base asset'),
-  orderType: z.enum(['MARKET', 'LIMIT']).default('LIMIT'),
-  price: z.string().optional().describe('Limit price in USDT'),
+  stopLoss: z.number().describe('REQUIRED stop loss price (kernel refuses naked orders)'),
+  takeProfit: z.number().describe('REQUIRED take profit price'),
+  confidence: z.number().min(0).max(1).default(0.7),
+  thesis: z.string().default('agent order'),
 });
 
 type PaperOrderInput = z.infer<typeof paperOrderSchema>;
 
-const executePaperOrder = async (input: PaperOrderInput): Promise<Record<string, unknown>> => {
-  const url = `${process.env.PAPER_BROKER_URL ?? 'http://localhost:3000'}/orders`;
-  const apiKey = process.env.PAPER_BROKER_API_KEY;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['x-api-key'] = apiKey;
+const gatedProposal = (input: PaperOrderInput, price: number): TradeProposal => ({
+  symbol: input.symbol.toUpperCase(),
+  direction: input.side === 'BUY' ? 'LONG' : 'SHORT',
+  entry: price,
+  stopLoss: input.stopLoss,
+  takeProfit: input.takeProfit,
+  orderType: 'MARKET',
+  leverage: 1,
+  setupType: 'AGENT_ORDER',
+  confidence: input.confidence,
+  thesis: input.thesis,
+  invalidation: `stop ${input.stopLoss}`,
+  source: 'LLM_STRATEGIST',
+});
 
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) throw new Error(`Paper broker responded with HTTP ${res.status}`);
-    return (await res.json()) as Record<string, unknown>;
-  } catch (err) {
-    // Non-destructive fallback when paper-broker is offline or unreachable
+/**
+ * Risk-gated order entry. The LLM can no longer place naked orders:
+ * every order passes validate -> size -> RiskEngine -> execute. Position
+ * size is computed by the kernel sizer, never by the model.
+ */
+const executeGatedOrder = async (input: PaperOrderInput): Promise<Record<string, unknown>> => {
+  const kernel = getKernel();
+  const symbol = input.symbol.toUpperCase();
+  const mtf = await buildMarketState(kernel.provider, symbol);
+  const proposal = gatedProposal(input, mtf.state.price.last);
+  const assessed = kernel.assess(proposal, mtf.state);
+  if (!assessed.risk.approved) {
     return {
-      status: 'MOCK_FILLED',
-      simulated: true,
-      reason: err instanceof Error ? err.message : 'Paper broker unreachable',
-      order: input,
+      status: 'REJECTED_BY_RISK_ENGINE',
+      decisionId: assessed.risk.decisionId,
+      rejections: assessed.risk.rejections,
+      reasons: assessed.risk.reasons,
+      checks: assessed.risk.checks,
     };
   }
+  const order = await kernel.executeProposal(proposal, assessed.sizing, assessed.risk);
+  return {
+    status: order.status,
+    decisionId: assessed.risk.decisionId,
+    orderId: order.orderId,
+    quantity: assessed.sizing.quantity,
+    notional: assessed.sizing.notional,
+    leverage: assessed.sizing.leverage,
+    riskAmount: assessed.sizing.riskAmount,
+  };
 };
 
 export const createPaperBrokerOrderTool = (): AnyTool =>
   defineTool({
     name: 'paper_broker_place_order',
-    description: 'Submit an order to the local paper-broker flagship platform',
+    description:
+      'Place a risk-gated market order (paper venue by default). Requires stopLoss ' +
+      'and takeProfit. Size is computed by the RiskEngine — you do not choose quantity.',
     schema: paperOrderSchema,
-    execute: async (input) => executePaperOrder(input),
+    execute: async (input) => executeGatedOrder(input),
   });
 
 export const createPaperBrokerPositionsTool = (): AnyTool =>
   defineTool({
     name: 'paper_broker_get_positions',
-    description: 'Fetch active open positions from the paper-broker platform',
+    description: 'Fetch open positions and balances from the configured execution venue.',
     schema: z.object({}),
     execute: async () => {
-      const url = `${process.env.PAPER_BROKER_URL ?? 'http://localhost:3000'}/positions`;
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-        if (!res.ok) throw new Error(`Paper broker HTTP ${res.status}`);
-        return (await res.json()) as Record<string, unknown>;
-      } catch {
-        return { positions: [], note: 'Paper broker offline or no positions active' };
-      }
+      const kernel = getKernel();
+      const [positions, balances] = await Promise.all([
+        kernel.broker.getPositions(),
+        kernel.broker.getBalances(),
+      ]);
+      return { venue: kernel.broker.id, positions, balances };
     },
   });
 
@@ -181,6 +207,7 @@ export const createTradingRegistry = (
   const adaptedTools = rawTools
     .filter((t) => targetSet.has(t.name))
     .map((t) => adaptBinanceTool(t, ctx));
+  const kernelTools = process.env.KERNEL_TOOLS === 'false' ? [] : createKernelTools();
 
   return new ToolRegistry({
     tools: [
@@ -188,6 +215,7 @@ export const createTradingRegistry = (
       createPositionSizeTool(),
       createPaperBrokerOrderTool(),
       createPaperBrokerPositionsTool(),
+      ...kernelTools,
       ...getOrchestratorTools(orchestrator),
     ],
     // Fail fast on slow exchange network responses

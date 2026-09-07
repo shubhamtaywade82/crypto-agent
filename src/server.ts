@@ -4,6 +4,8 @@ import { streamSSE } from 'hono/streaming';
 import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 import { runTradingAgent } from './agent.js';
 import { binanceClient } from './config.js';
+import { getKernel } from './kernel.js';
+import { buildMarketState } from './engines/market-state-engine.js';
 
 export const app = new Hono();
 
@@ -16,6 +18,38 @@ app.get('/metrics', (c) =>
     timestamp: Date.now(),
   })
 );
+
+// ---- Kernel v2 endpoints (observability + manual pipeline triggers) ----
+
+app.get('/api/kernel/state/:symbol', async (c) => {
+  const kernel = getKernel();
+  const symbol = c.req.param('symbol').toUpperCase();
+  const mtf = await buildMarketState(kernel.provider, symbol);
+  return c.json(mtf.state);
+});
+
+app.get('/api/kernel/portfolio', async (c) => {
+  const kernel = getKernel();
+  return c.json(await kernel.portfolio.refresh());
+});
+
+app.get('/api/kernel/events', (c) => {
+  const kernel = getKernel();
+  const limit = Number(c.req.query('limit') ?? 50);
+  return c.json({ events: kernel.store.readAll(limit) });
+});
+
+app.post('/api/kernel/pipeline/:symbol', async (c) => {
+  const kernel = getKernel();
+  const symbol = c.req.param('symbol').toUpperCase();
+  const trace = await kernel.lanes.enqueue(symbol, () => kernel.runPipeline(symbol));
+  return c.json(trace);
+});
+
+app.get('/api/kernel/orders', (c) => {
+  const kernel = getKernel();
+  return c.json({ orders: kernel.execution.listOpen() });
+});
 
 app.get('/api/klines', async (c) => {
   const symbol = (c.req.query('symbol') ?? 'BTCUSDT').toUpperCase();

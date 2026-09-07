@@ -82,14 +82,20 @@ describe('Tool Adapter & Trading Registry with Built-in Binance Tools', () => {
     const registry = createTradingRegistry(mockBinance, ['spot_ticker_price', 'spot_klines']);
     const defs = registry.definitions();
 
-    // 2 spot tools + calculate_position_size + 2 paper-broker tools = 5
-    expect(defs).toHaveLength(5);
+    // 2 spot tools + calculate_position_size + 2 paper-broker tools + 6 kernel tools = 11
+    expect(defs).toHaveLength(11);
     const names = defs.map((d) => d.function.name);
     expect(names).toContain('spot_ticker_price');
     expect(names).toContain('spot_klines');
     expect(names).toContain('calculate_position_size');
     expect(names).toContain('paper_broker_place_order');
     expect(names).toContain('paper_broker_get_positions');
+    expect(names).toContain('get_market_state');
+    expect(names).toContain('get_trade_setups');
+    expect(names).toContain('propose_trade');
+    expect(names).toContain('execute_approved_intent');
+    expect(names).toContain('get_portfolio_state');
+    expect(names).toContain('get_risk_status');
   });
 
   it('includes watch and journal tools when orchestrator is passed', () => {
