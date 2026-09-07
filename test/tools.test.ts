@@ -16,7 +16,7 @@ describe('Tool Adapter & Trading Registry with Built-in Binance Tools', () => {
   };
 
   it('adapts a Binance SDK tool to an Ollama AnyTool', async () => {
-    const adapted = adaptBinanceTool(mockTool, { env: 'testnet', isSigned: false });
+    const adapted = adaptBinanceTool(mockTool, { env: 'live', isSigned: false });
     expect(adapted.name).toBe('mock_ping');
     expect(adapted.description).toBe('Ping test');
 

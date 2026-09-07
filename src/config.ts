@@ -9,7 +9,7 @@ export const ollamaClient = new OllamaClient({
 export const binanceClient = new BinanceClient({
   apiKey: process.env.BINANCE_API_KEY,
   apiSecret: process.env.BINANCE_API_SECRET,
-  testnet: process.env.BINANCE_TESTNET !== 'false',
+  testnet: false,
 });
 
 export const defaultModel = process.env.OLLAMA_MODEL ?? 'gemma4:cloud';

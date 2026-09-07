@@ -57,7 +57,7 @@ export class BinanceMarketDataProvider implements IMarketDataProvider {
         changePct = prev > 0 ? ((oi - prev) / prev) * 100 : 0;
       }
     } catch {
-      // Historical OI endpoint is unavailable on Binance testnet; default to zero change
+      // Historical OI endpoint is optional; default to zero change if request fails
       changePct = 0;
     }
     return { oi, changePct: Number(changePct.toFixed(3)) };

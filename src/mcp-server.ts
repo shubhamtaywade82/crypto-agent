@@ -55,7 +55,7 @@ export const createMcpServer = (): Server => {
   );
 
   const ctx: ToolContext = {
-    env: process.env.BINANCE_TESTNET !== 'false' ? 'testnet' : 'live',
+    env: 'live',
     isSigned: Boolean(process.env.BINANCE_API_KEY),
   };
   const tools = spotTools(binanceClient);
