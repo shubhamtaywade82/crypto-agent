@@ -47,13 +47,19 @@ export class BinanceMarketDataProvider implements IMarketDataProvider {
   }
 
   async getOpenInterest(symbol: string): Promise<{ oi: number; changePct: number }> {
-    const [current, hist] = await Promise.all([
-      this.client.futures.data.openInterest(symbol),
-      this.client.futures.data.openInterestHist(symbol, '1h', 2),
-    ]);
+    const current = await this.client.futures.data.openInterest(symbol);
     const oi = Number(current.openInterest);
-    const prev = hist.length > 0 ? Number(hist[0]!.sumOpenInterest) : oi;
-    const changePct = prev > 0 ? ((oi - prev) / prev) * 100 : 0;
+    let changePct = 0;
+    try {
+      const hist = await this.client.futures.data.openInterestHist(symbol, '1h', 2);
+      if (Array.isArray(hist) && hist.length > 0 && hist[0]?.sumOpenInterest) {
+        const prev = Number(hist[0].sumOpenInterest);
+        changePct = prev > 0 ? ((oi - prev) / prev) * 100 : 0;
+      }
+    } catch {
+      // Historical OI endpoint is unavailable on Binance testnet; default to zero change
+      changePct = 0;
+    }
     return { oi, changePct: Number(changePct.toFixed(3)) };
   }
 }

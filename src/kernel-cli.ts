@@ -22,6 +22,7 @@ const runOnce = async (): Promise<void> => {
             decisionId: trace.risk?.decisionId,
             approved: trace.risk?.approved,
             order: trace.order,
+            error: trace.error,
           });
         })
         .catch((err: unknown) => {
@@ -42,7 +43,6 @@ const main = async (): Promise<void> => {
   const timer = setInterval(() => {
     void runOnce();
   }, INTERVAL_MS);
-  if (timer.unref) timer.unref();
 
   const shutdown = (): void => {
     kernel.log.info('kernel loop stopping');
