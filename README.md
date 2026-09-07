@@ -76,8 +76,7 @@ npm run kernel                 # KERNEL_SYMBOLS=BTCUSDT,SOLUSDT, scans every 5 m
 Kernel API (observability): `GET /api/kernel/state/:symbol`, `GET /api/kernel/portfolio`,
 `GET /api/kernel/events`, `GET /api/kernel/orders`, `POST /api/kernel/pipeline/:symbol`.
 
-Docs: `docs/REVIEW.md` (e2e scorecard) · `docs/ROADMAP.md` (phases + acceptance criteria) ·
-`docs/ADR-001-broker-split.md` (venue decision record).
+Docs: `AGENTS.md` (developer & AI agent guide) · `docs/DEPLOYMENT.md` (server & cloud guide) · `docs/REVIEW.md` (e2e scorecard) · `docs/ROADMAP.md` (phases + acceptance criteria) · `docs/ADR-001-broker-split.md` (venue decision record).
 
 ---
 
