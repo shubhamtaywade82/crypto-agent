@@ -18,6 +18,15 @@ export interface PortfolioState {
   readonly lossStreak: number;
   readonly exposures: readonly SymbolExposure[];
   readonly updatedAt: number;
+  // ---- valuation provenance (kernel v3) ----
+  /** All equity figures are USDT-normalized (INR divided by live FX). */
+  readonly currencyBasis?: 'USDT';
+  /** USDT/INR rate applied during this snapshot (1 when no INR present). */
+  readonly fxRate?: number;
+  /** Freshness of the FX rate used (NOT_REQUIRED when no INR balances). */
+  readonly fxFreshness?: string;
+  /** Balances excluded from valuation because they cannot be normalized. */
+  readonly valuationExcluded?: readonly string[];
 }
 
 export const emptyPortfolio = (equity: number): PortfolioState => ({

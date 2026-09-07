@@ -96,4 +96,44 @@ describe('PaperExecutionBroker', () => {
     expect(found?.status).toBe('FILLED');
     expect(await b.getOrder('B-SOL_USDT', 'missing-id')).toBeUndefined();
   });
+
+  it('lookupOrder distinguishes FOUND from NOT_FOUND', async () => {
+    const b = fresh();
+    await b.placeOrder({ intentId: 'known-id', ...order() });
+    const found = await b.lookupOrder('B-SOL_USDT', 'known-id');
+    expect(found.kind).toBe('FOUND');
+    const missing = await b.lookupOrder('B-SOL_USDT', 'unknown-id');
+    expect(missing.kind).toBe('NOT_FOUND');
+  });
+
+  it('rejects fills beyond the tolerated deviation from expectedPrice', async () => {
+    const b = new PaperExecutionBroker({ initialBalance: 10_000, slippageRate: 0.005 }); // 50 bps slip
+    b.setMarkPrice('B-SOL_USDT', 100);
+    const breached = await b.placeOrder({
+      intentId: 'breach', ...order({ expectedPrice: 100, maxSlippageBps: 25 }),
+    });
+    expect(breached.status).toBe('REJECTED');
+
+    const within = await b.placeOrder({
+      intentId: 'within', ...order({ expectedPrice: 100, maxSlippageBps: 100 }),
+    });
+    expect(within.status).toBe('FILLED');
+  });
+
+  it('records realized closes for the performance ledger', async () => {
+    const closes: { pnl: number }[] = [];
+    const b = new PaperExecutionBroker({
+      initialBalance: 10_000,
+      onClose: (c) => closes.push({ pnl: c.pnl }),
+    });
+    b.setMarkPrice('B-SOL_USDT', 100);
+    await b.placeOrder({ intentId: 't1', ...order({ quantity: 2 }) });
+    b.setMarkPrice('B-SOL_USDT', 110);
+    await b.placeOrder({
+      intentId: 't2', ...order({ side: 'sell', quantity: 2, reduceOnly: true }),
+    });
+    expect(closes).toHaveLength(1);
+    expect(closes[0]!.pnl).toBeGreaterThan(0);
+    expect(b.realizedCloses).toHaveLength(1);
+  });
 });

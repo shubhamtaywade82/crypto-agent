@@ -21,6 +21,16 @@ export const floorToStep = (value: Decimal, step: Decimal): Decimal => {
   return value.div(step).toDecimalPlaces(0, Decimal.ROUND_DOWN).times(step);
 };
 
+/**
+ * Ceil a value up to the exchange step size. Required when satisfying a
+ * MINIMUM (e.g. min-notional): flooring can leave the quantity just below
+ * the required minimum, while ceiling guarantees the floor constraint holds.
+ */
+export const ceilToStep = (value: Decimal, step: Decimal): Decimal => {
+  if (step.lte(0)) return value;
+  return value.div(step).toDecimalPlaces(0, Decimal.ROUND_UP).times(step);
+};
+
 /** Percentage of an amount: pctOf(10000, 0.5) => 50 */
 export const pctOf = (amount: Decimal, percent: Decimal): Decimal =>
   amount.times(percent).dividedBy(100);

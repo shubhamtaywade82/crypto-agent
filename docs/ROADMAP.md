@@ -1,7 +1,8 @@
 # ROADMAP — crypto-agent 9+
 
 Phased plan with acceptance criteria. Phases 1–4 are implemented on
-`feat/coindcx-execution`; phases 5–6 remain open work.
+`feat/coindcx-execution`; kernel v3 correctness lands on
+`feat/trading-kernel-v3`; phases 5–6 remain open work.
 
 ## Phase 1 — Trading kernel ✅ (this branch)
 
@@ -33,6 +34,60 @@ and validator; no code path from LLM output to order without RiskEngine approval
 
 **Acceptance:** kill -9 mid-submit → restart → reconciler converges internal state to broker
 state within one interval; duplicate submit with same decisionId cannot double-fill.
+
+## Phase 2.5 — Kernel v3 correctness ✅ (branch `feat/trading-kernel-v3`)
+
+Closes the highest-risk correctness gaps found in the v2 review: runtime state
+integrity, portfolio accounting, execution reconciliation truth, and concurrency.
+
+- [x] FSM audit integrity: `order.transition` events record the true `from → to`
+      (old state captured before mutation, never `from === to`)
+- [x] Truthful broker lookups: `BrokerLookupResult = FOUND | NOT_FOUND | LOOKUP_FAILED`;
+      `LOOKUP_FAILED` (outage/auth/rate-limit) holds state instead of cancelling —
+      the old `undefined`-conflation could cancel live orders during an exchange outage
+- [x] Order+position reconciliation: reconciler snapshots positions each cycle; a
+      confirmed fill with live position evidence advances to `POSITION_OPEN`; a
+      `NOT_FOUND` with contradicting position evidence is held for review
+- [x] Canonical portfolio valuation: INR/USDT normalized to a USDT basis through a
+      TTL-bounded FX rate (fresh < 30s, stale-usable < 120s, else excluded — never
+      mis-added); valuation provenance (fxRate, freshness, exclusions) on every snapshot
+- [x] Real portfolio metrics: `PerformanceEngine` measures daily realized PnL, loss
+      streak, drawdown (equity high-water mark), win/loss stats from realized closes;
+      persisted via the event store and hydrated on restart (no more `() => 0` zeros)
+- [x] Paper venue emits realized closes (`onClose` ledger) feeding the performance engine
+- [x] Real instrument specs in sizing: `ContractRegistry` with sane-spec gate, TTL cache,
+      bounded stale-while-error; spec unavailability rejects with
+      `INSTRUMENT_SPEC_UNAVAILABLE` (trading degraded) instead of synthetic fallback specs
+- [x] Global risk reservations: `RiskReservationManager` gates concurrent symbol lanes
+      against projected position/symbol/cluster/gross limits; commit-on-fill,
+      release-on-fail, TTL expiry for orders stuck in UNKNOWN
+- [x] Pipeline statuses: structurally invalid proposals surface as `INVALID_PROPOSAL`
+      (with `proposal.invalid` audit events), distinct from `REJECTED`
+- [x] Min-notional rounding: `ceil` to lot step (floor could land below the minimum),
+      followed by the risk-budget tolerance check
+- [x] CoinDCX FX TTL cache with fresh/stale/expired policy — refuses to price INR orders
+      on an expired rate instead of using a possibly ancient cached value
+- [x] Execution-quality contract: `expectedPrice` + `maxSlippageBps` on
+      `PlaceOrderRequest`; CoinDCX converts guarded market orders to marketable IOC
+      limits, paper venue rejects breaches; requests carry strategy/decision lineage
+- [x] Event store durability contract: critical order events (`order.*`, `reconcile`)
+      must persist in durable (live) mode — write failures mark the store unhealthy and
+      block new submissions
+- [x] Strategist contract tightened to `{action, candidateId, confidence, thesis,
+      invalidation}`; levels resolved server-side from the canonical candidate
+- [x] `CrossVenueState` domain (basis, spread bps, execution premium, staleness health)
+      ready for runtime wiring
+- [x] Pipeline refreshes live portfolio state every run (no more trading on stale/zero
+      fallback equity)
+- [ ] CoinDCX fills ledger → realized PnL for the LIVE venue (paper is complete)
+- [ ] Wire `CrossVenueState` into the live pipeline gate (module + tests ready)
+- [ ] Private WS streams to drive the FSM push-based (see Phase 2 open items)
+
+**Acceptance:** concurrent same-moment approvals on two symbols cannot exceed
+`maxConcurrentPositions` or gross exposure caps (tested); a CoinDCX outage during
+reconciliation leaves every tracked order in its pre-outage state (tested); equity of
+`10,000 INR + 1,000 USDT` is never 11,000 (tested); every audit event is a genuine
+`from → to` transition (tested).
 
 ## Phase 3 — Intelligence ✅ (this branch)
 

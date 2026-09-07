@@ -65,7 +65,7 @@ export class ExecutionEngine {
       status: 'RISK_APPROVED', filledQuantity: 0, updatedAt: Date.now(),
     };
     this.orders.set(spec.intentId, tracked);
-    this.store.append({
+    this.store.appendClassified({
       type: 'order.registered', symbol: spec.symbol, decisionId: spec.intentId,
       payload: { pair: spec.pair, side: spec.side, quantity: spec.quantity },
     });
@@ -76,6 +76,11 @@ export class ExecutionEngine {
   async submit(intentId: string, req: Omit<PlaceOrderRequest, 'intentId'>): Promise<TrackedOrder> {
     const tracked = this.orders.get(intentId);
     if (!tracked) throw new Error(`unknown intent ${intentId}`);
+    // Durability contract: never send an order to the venue while the
+    // audit backbone cannot persist its lifecycle.
+    if (!this.store.healthy) {
+      throw new Error(`event store unhealthy (last: ${this.store.lastError}); submission blocked`);
+    }
     this.transition(tracked, 'SUBMITTING');
     try {
       const placed = await withTimeout(
@@ -86,7 +91,7 @@ export class ExecutionEngine {
       return tracked;
     } catch (err) {
       this.transition(tracked, 'UNKNOWN');
-      this.store.append({
+      this.store.appendClassified({
         type: 'order.unknown', symbol: tracked.symbol, decisionId: intentId,
         payload: { reason: err instanceof Error ? err.message : String(err) },
       });
@@ -114,12 +119,15 @@ export class ExecutionEngine {
 
   transition(tracked: TrackedOrder, to: OrderStatus): void {
     if (tracked.status === to) return;
-    assertTransition(tracked.status, to);
+    // Capture the OLD state BEFORE mutating — the audit event must record
+    // the actual transition (from -> to), not from<new> -> to<new>.
+    const from: OrderStatus = tracked.status;
+    assertTransition(from, to);
     tracked.status = to;
     tracked.updatedAt = Date.now();
-    this.store.append({
+    this.store.appendClassified({
       type: 'order.transition', symbol: tracked.symbol, decisionId: tracked.intentId,
-      payload: { from: tracked.status, to, orderId: tracked.orderId ?? null },
+      payload: { from, to, orderId: tracked.orderId ?? null },
     });
   }
 }

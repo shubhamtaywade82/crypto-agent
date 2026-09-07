@@ -132,7 +132,7 @@ const executeGatedOrder = async (input: PaperOrderInput): Promise<Record<string,
   const symbol = input.symbol.toUpperCase();
   const mtf = await buildMarketState(kernel.provider, symbol);
   const proposal = gatedProposal(input, mtf.state.price.last);
-  const assessed = kernel.assess(proposal, mtf.state);
+  const assessed = await kernel.assess(proposal, mtf.state);
   if (!assessed.risk.approved) {
     return {
       status: 'REJECTED_BY_RISK_ENGINE',

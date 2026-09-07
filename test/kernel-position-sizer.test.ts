@@ -80,4 +80,21 @@ describe('PositionSizer pipeline', () => {
     const r = sizePosition(makeInput({ requestedLeverage: 10, spec }));
     expect(r.leverage).toBe(2);
   });
+
+  it('rounds min-notional quantity UP to the lot step (ceil, not floor)', () => {
+    // entry 97, minNotional 100, lot 1: flooring 100/97 to the lot step
+    // gives 1 (notional 97 < 100 — the old bug); ceiling gives 2.
+    const spec = { ...FALLBACK_SPEC('TST'), lotSize: 1, minQuantity: 1, minNotional: 100 };
+    const r = sizePosition(makeInput({
+      entry: 97,
+      stop: 96,
+      equity: 100_000,
+      availableMargin: 100_000,
+      spec,
+    }));
+    expect(r.ok).toBe(true);
+    expect(r.quantity).toBeGreaterThanOrEqual(2);
+    expect(r.notional).toBeGreaterThanOrEqual(100);
+    expect(r.quantity % 1).toBeCloseTo(0, 8); // lot aligned
+  });
 });
