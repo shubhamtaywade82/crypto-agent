@@ -1,6 +1,6 @@
 import type { IExecutionBroker, PlaceOrderRequest } from '../infrastructure/broker/broker.js';
 import type { OrderStatus } from '../domain/orders/order-state.js';
-import { assertTransition, isFailure } from '../domain/orders/order-state.js';
+import { assertTransition } from '../domain/orders/order-state.js';
 import type { BrokerOrder } from '../infrastructure/broker/broker.js';
 import type { EventStore } from '../infrastructure/events/event-store.js';
 import type { Logger } from '../infrastructure/observability/logger.js';
@@ -43,9 +43,11 @@ export class ExecutionEngine {
     return this.orders.get(intentId);
   }
 
+  /** Open orders still needing reconciliation — UNKNOWN included by design. */
   listOpen(): readonly TrackedOrder[] {
     return [...this.orders.values()].filter(
-      (o) => !isFailure(o.status) && o.status !== 'CLOSED'
+      (o) => o.status !== 'CLOSED' && o.status !== 'REJECTED' &&
+        o.status !== 'CANCELLED' && o.status !== 'EXPIRED'
     );
   }
 

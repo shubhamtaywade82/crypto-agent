@@ -49,6 +49,7 @@ export class PaperExecutionBroker implements IExecutionBroker {
 
   private readonly orders = new Map<string, PaperState>();
   private readonly positions = new Map<string, PaperPositionState>();
+  private readonly marks = new Map<string, number>();
   private balance: number;
   private readonly takerFee: number;
   private readonly slippage: number;
@@ -201,6 +202,7 @@ export class PaperExecutionBroker implements IExecutionBroker {
   }
 
   setMarkPrice(pair: string, price: number): void {
+    this.marks.set(pair, price);
     for (const pos of this.positions.values()) {
       if (pos.pair === pair) pos.markPrice = price;
     }
@@ -212,6 +214,8 @@ export class PaperExecutionBroker implements IExecutionBroker {
   }
 
   private markFor(pair: string): number {
+    const stored = this.marks.get(pair);
+    if (stored !== undefined) return stored;
     for (const pos of this.positions.values()) {
       if (pos.pair === pair) return pos.markPrice;
     }
