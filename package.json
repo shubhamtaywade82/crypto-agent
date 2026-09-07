@@ -12,6 +12,7 @@
     "dev": "tsx src/main.ts",
     "mcp": "tsx src/mcp-server.ts",
     "kernel": "tsx src/kernel-cli.ts",
+    "kernel:daemon": "tsx src/kernel-cli.ts --headless",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"

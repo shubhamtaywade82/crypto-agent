@@ -1,4 +1,5 @@
 import { getKernel } from './kernel.js';
+import { startInteractiveRepl } from './main.js';
 
 const SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT')
   .split(',')
@@ -35,14 +36,12 @@ const runOnce = async (): Promise<void> => {
   );
 };
 
-const main = async (): Promise<void> => {
+const runHeadless = async (): Promise<void> => {
   const kernel = getKernel();
   kernel.reconciler.start();
   kernel.log.info('kernel loop starting', { symbols: SYMBOLS, intervalMs: INTERVAL_MS, venue: kernel.venue });
   await runOnce();
-  const timer = setInterval(() => {
-    void runOnce();
-  }, INTERVAL_MS);
+  const timer = setInterval(() => { void runOnce(); }, INTERVAL_MS);
 
   const shutdown = (): void => {
     kernel.log.info('kernel loop stopping');
@@ -54,7 +53,17 @@ const main = async (): Promise<void> => {
   process.on('SIGTERM', shutdown);
 };
 
+const main = async (): Promise<void> => {
+  const headless = process.argv.includes('--headless') || process.argv.includes('--daemon') || !process.stdout.isTTY;
+  if (headless) {
+    await runHeadless();
+    return;
+  }
+  await startInteractiveRepl();
+};
+
 main().catch((err: unknown) => {
   process.stderr.write(`kernel fatal: ${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);
 });
+
