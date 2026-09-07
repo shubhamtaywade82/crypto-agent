@@ -2,6 +2,7 @@ import { PriceWatcher } from './watcher.js';
 import { TradeJournal } from './journal.js';
 import { runTradingAgent } from '../agent.js';
 import { sendTelegramAlert, sendTelegramStatus } from '../notifications/telegram.js';
+import { SymbolLanes } from '../engines/event-bus.js';
 import type { MarketTicker, WatchCondition, WatchTriggerEvent, WatcherStatus } from '../types.js';
 
 type TriggerListener = (event: WatchTriggerEvent, analysis: string) => void;
@@ -21,7 +22,8 @@ export class WatchOrchestrator {
   public readonly journal: TradeJournal;
   private readonly listeners = new Set<TriggerListener>();
   private readonly tickListeners = new Set<TickListener>();
-  private processing = false;
+  /** Per-symbol serialized lanes — BTC and SOL no longer block each other. */
+  private readonly lanes = new SymbolLanes();
 
   constructor(baseStreamUrl?: string, journal?: TradeJournal) {
     this.watcher = new PriceWatcher(baseStreamUrl);
@@ -74,22 +76,23 @@ export class WatchOrchestrator {
     this.tickListeners.clear();
   }
 
-  private async handleTrigger(event: WatchTriggerEvent): Promise<void> {
-    // Serialize re-analysis to avoid concurrent LLM calls
-    if (this.processing) return;
-    this.processing = true;
-
-    try {
-      const active = this.journal.findActiveTrade(event.condition.symbol);
-      let prompt = event.condition.reEvaluationPrompt;
-      if (active) {
-        prompt += `\n[System Alert: Active ${active.direction} trade exists for ${event.condition.symbol} (Entry: ${active.entryPrice}, SL: ${active.stopLoss}, TP: ${active.takeProfit}). If this hit TP/SL, execute record_trade_outcome with post-mortem critique and lessons learned.]`;
+  private handleTrigger(event: WatchTriggerEvent): Promise<void> {
+    // Serialized per symbol; different symbols process in parallel.
+    return this.lanes.enqueue(event.condition.symbol, async () => {
+      try {
+        const active = this.journal.findActiveTrade(event.condition.symbol);
+        let prompt = event.condition.reEvaluationPrompt;
+        if (active) {
+          prompt += `\n[System Alert: Active ${active.direction} trade exists for ${event.condition.symbol} (Entry: ${active.entryPrice}, SL: ${active.stopLoss}, TP: ${active.takeProfit}). If this hit TP/SL, execute record_trade_outcome with post-mortem critique and lessons learned.]`;
+        }
+        const analysis = await runTradingAgent(prompt, { orchestrator: this });
+        await sendTelegramAlert(event, analysis);
+        for (const listener of this.listeners) listener(event, analysis);
+      } catch (err) {
+        await sendTelegramStatus(
+          `⚠️ Re-analysis failed for ${event.condition.symbol}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
-      const analysis = await runTradingAgent(prompt, { orchestrator: this });
-      await sendTelegramAlert(event, analysis);
-      for (const listener of this.listeners) listener(event, analysis);
-    } finally {
-      this.processing = false;
-    }
+    });
   }
 }

@@ -28,6 +28,59 @@ graph TD
 
 ---
 
+## 🧠 Architecture v2 — Deterministic Trading Kernel
+
+Branch `feat/coindcx-execution` adds a deterministic trading kernel. The LLM is now one
+component inside the system, and it can only **propose** — a hard-gated pipeline decides:
+
+```
+Binance (market data ONLY)          CoinDCX (execution ONLY)
+        │                                   ▲
+        ▼                                   │
+  MarketState engine ──► Setup engine ──► Policy Gate ──► Execution FSM
+        │                     │          (validator +       │
+  MTF / regime /          Analyst role      sizer + risk)   ▼
+  liquidity / vol         Strategist role        ──── REJECTED (terminal)
+        │                 Risk challenger                 │
+        └────────────── EventStore (decisionId audit) ◄──┘
+```
+
+- **Trading kernel** (`src/domain`, `src/engines`): order FSM incl. `UNKNOWN` +
+  reconciliation, `TradeValidator` (SL<entry<TP geometry, min R:R), professional position
+  sizing (fees → slippage → funding → lot step → min notional → caps → margin), `RiskEngine`
+  with circuit breaker (`NORMAL → CAUTION → REDUCED → HALTED → EMERGENCY`), prop-firm
+  defaults: 0.25% risk/trade, 1% daily stop, 2x max leverage, min RR 2.5.
+- **Broker split** (see `docs/ADR-001-broker-split.md`): Binance serves data via a
+  provider that *structurally cannot* place orders; CoinDCX executes futures orders
+  (idempotent `client_order_id`, TPSL, leverage, INR/USDT auto-fallback with live USDTINR FX).
+- **Multi-role agent layer** (`src/agents`): Analyst → Strategist (chooses among
+  pre-validated setups) → Risk Challenger (advisory) — all Zod-validated, fail-closed.
+- **Multi-timeframe intelligence**: swings/BOS/CHoCH, liquidity sweeps, volatility
+  percentile regimes, 9-state regime classification, weighted 4h→5m alignment.
+
+### Kernel tools exposed to the LLM
+
+`get_market_state` · `get_trade_setups` · `propose_trade` (Policy Gate) ·
+`execute_approved_intent` · `get_portfolio_state` · `get_risk_status` — plus
+`paper_broker_place_order`, now risk-gated (SL/TP required; size is computed by the kernel,
+never by the model).
+
+### Running the autonomous kernel loop
+
+```bash
+cp .env.example .env           # EXECUTION_VENUE=paper by default
+npm install
+npm run kernel                 # KERNEL_SYMBOLS=BTCUSDT,SOLUSDT, scans every 5 min
+```
+
+Kernel API (observability): `GET /api/kernel/state/:symbol`, `GET /api/kernel/portfolio`,
+`GET /api/kernel/events`, `GET /api/kernel/orders`, `POST /api/kernel/pipeline/:symbol`.
+
+Docs: `docs/REVIEW.md` (e2e scorecard) · `docs/ROADMAP.md` (phases + acceptance criteria) ·
+`docs/ADR-001-broker-split.md` (venue decision record).
+
+---
+
 ## ✨ Features
 
 - **ReAct Decision Loop:** Native tool calling with `think: 'high'` reasoning traces powered by Gemma 4.
