@@ -71,29 +71,30 @@ const useWatcherData = (orchestrator: WatchOrchestrator): WatcherData => {
 };
 
 const MarketTickerBar = ({ tickers }: { tickers: MarketTicker[] }): React.JSX.Element => (
-  <Box flexWrap="wrap" gap={1}>
-    <Text bold color="yellow">⚡ Live:</Text>
-    {tickers.map((t, i) => (
-      <Text key={t.symbol} color="gray">
-        {i > 0 && <Text color="gray">│ </Text>}
-        <Text color="cyan">{t.symbol.replace('USDT', '')}</Text>{' '}
-        <Text color="white">{formatMarketPrice(t.symbol, t.price)}</Text>
-      </Text>
-    ))}
+  <Box gap={1}>
+    <Text color="gray" wrap="truncate">
+      <Text bold color="yellow">⚡ Live:</Text>{' '}
+      {tickers.map((t, i) => (
+        <React.Fragment key={t.symbol}>
+          {i > 0 ? ' │ ' : ''}
+          <Text color="cyan">{t.symbol.replace('USDT', '')}</Text>{' '}
+          <Text color="white">{formatMarketPrice(t.symbol, t.price)}</Text>
+        </React.Fragment>
+      ))}
+    </Text>
   </Box>
 );
 
 const PositionsBar = ({ positions }: { positions: readonly BrokerPosition[] }): React.JSX.Element => {
   if (positions.length === 0) {
     return (
-      <Box gap={1}>
-        <Text color="gray">📊 <Text bold color="cyan">Positions (0/2):</Text> No active positions (risk cap: 0.25%/trade · min 2.5 RR)</Text>
-      </Box>
+      <Text color="gray" wrap="truncate">
+        📊 <Text bold color="cyan">Positions (0/2):</Text> No active positions (risk cap: 0.25%/trade · min 2.5 RR)
+      </Text>
     );
   }
   return (
     <Box flexDirection="column">
-      <Text color="gray">📊 <Text bold color="cyan">Positions ({positions.length}/2):</Text></Text>
       {positions.map((p, idx) => {
         const upnl = p.unrealizedPnl ?? 0;
         const isProfit = upnl >= 0;
@@ -101,11 +102,10 @@ const PositionsBar = ({ positions }: { positions: readonly BrokerPosition[] }): 
         const pnlPct = notional > 0 ? (upnl / notional) * 100 : 0;
         const key = p.positionId || `${p.pair}-${idx}`;
         return (
-          <Text key={key} color="gray">
-            {'  '}{p.side === 'long' ? '🟢' : '🔴'} <Text bold color="white">{p.pair}</Text>{' '}
+          <Text key={key} color="gray" wrap="truncate">
+            {p.side === 'long' ? '🟢' : '🔴'} <Text bold color="white">{p.pair}</Text>{' '}
             <Text color={p.side === 'long' ? 'green' : 'red'}>{p.side.toUpperCase()} {p.size}</Text>{' '}
             @ <Text color="white">${p.entryPrice.toFixed(2)}</Text>{' '}
-            {p.markPrice ? <Text color="gray">(Mark: ${p.markPrice.toFixed(2)}) </Text> : null}
             │ PnL: <Text bold color={isProfit ? 'green' : 'red'}>
               {isProfit ? '+' : ''}${upnl.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)
             </Text>
@@ -116,56 +116,41 @@ const PositionsBar = ({ positions }: { positions: readonly BrokerPosition[] }): 
   );
 };
 
-const WatchItem = ({ w }: { w: WatcherStatus }): React.JSX.Element => {
-  const isClose = w.currentPrice !== undefined
-    ? Math.abs((w.targetPrice - w.currentPrice) / w.currentPrice) < 0.005
-    : false;
-
-  return (
-    <Text color="gray">
-      {directionIcon(w.type)} <Text color="cyan">{w.symbol}</Text>{' '}
-      {w.currentPrice !== undefined ? (
-        <Text>
-          <Text color="white">${w.currentPrice.toFixed(2)}</Text>{' '}
-          <Text color="gray">➔</Text>{' '}
-          <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${w.targetPrice}</Text>{' '}
-          <Text color={isClose ? 'red' : 'gray'}>({formatDistance(w.currentPrice, w.targetPrice)})</Text>
-        </Text>
-      ) : (
-        <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${w.targetPrice}</Text>
-      )}
-    </Text>
-  );
-};
-
 const WatchList = ({ statuses }: { statuses: WatcherStatus[] }): React.JSX.Element => (
-  <Box flexWrap="wrap" gap={1}>
-    <Text color="gray">📡 <Text bold color="yellow">Watches ({statuses.length}):</Text></Text>
-    {statuses.map((w, idx) => (
-      <Box key={w.id}>
-        {idx > 0 && <Text color="gray">│ </Text>}
-        <WatchItem w={w} />
-      </Box>
-    ))}
+  <Box gap={1}>
+    <Text color="gray" wrap="truncate">
+      📡 <Text bold color="yellow">Watches ({statuses.length}):</Text>{' '}
+      {statuses.slice(0, 3).map((w, idx) => (
+        <React.Fragment key={w.id}>
+          {idx > 0 ? ' │ ' : ''}
+          {directionIcon(w.type)} <Text color="cyan">{w.symbol.replace('USDT', '')}</Text>{' '}
+          <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${w.targetPrice}</Text>
+          {w.currentPrice !== undefined ? (
+            <Text color="gray"> ({formatDistance(w.currentPrice, w.targetPrice)})</Text>
+          ) : null}
+        </React.Fragment>
+      ))}
+      {statuses.length > 3 ? ` (+${statuses.length - 3} more)` : ''}
+    </Text>
   </Box>
 );
 
 const TriggerList = ({ triggers }: { triggers: TriggerLog[] }): React.JSX.Element => (
-  <Box flexWrap="wrap" gap={1}>
-    <Text color="red">🔔 <Text bold color="red">Triggers:</Text></Text>
+  <Text color="yellow" wrap="truncate">
+    🔔 <Text bold color="red">Triggers:</Text>{' '}
     {triggers.slice(0, 3).map((t, i) => (
-      <Text key={`trig-${i}`} color="yellow">
-        {i > 0 && <Text color="gray">│ </Text>}
-        ⚡ {t.symbol} @ ${t.price} [{t.time}]
-      </Text>
+      <React.Fragment key={`trig-${i}`}>
+        {i > 0 ? ' │ ' : ''}
+        ⚡ {t.symbol.replace('USDT', '')} @ ${t.price} [{t.time}]
+      </React.Fragment>
     ))}
-  </Box>
+  </Text>
 );
 
 export const WatcherPanel = ({ orchestrator }: { orchestrator: WatchOrchestrator }): React.JSX.Element => {
   const { statuses, triggers, tickers, positions } = useWatcherData(orchestrator);
   return (
-    <Box flexDirection="column" marginY={1}>
+    <Box flexDirection="column">
       <MarketTickerBar tickers={tickers} />
       <PositionsBar positions={positions} />
       {statuses.length > 0 && <WatchList statuses={statuses} />}

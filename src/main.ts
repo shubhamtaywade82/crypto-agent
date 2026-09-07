@@ -70,7 +70,10 @@ const executeWithStreaming = async (prompt: string): Promise<void> => {
 
 const startInteractiveRepl = async (): Promise<void> => {
   if (process.stdin.isTTY) {
-    const { waitUntilExit } = render(React.createElement(App));
+    if (!process.env.LOG_LEVEL) process.env.LOG_LEVEL = 'warn';
+    const { waitUntilExit } = render(React.createElement(App), {
+      exitOnCtrlC: true,
+    });
     await waitUntilExit();
     return;
   }
