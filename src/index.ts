@@ -7,6 +7,8 @@ export * from './tools.js';
 export * from './agent.js';
 export { PriceWatcher } from './engine/watcher.js';
 export { WatchOrchestrator } from './engine/orchestrator.js';
+export { TradeJournal } from './engine/journal.js';
+export { AutonomousScanner, buildScanPrompt } from './engine/scanner.js';
 export { sendTelegramAlert, sendTelegramStatus } from './notifications/telegram.js';
 
 const isDirectRun =

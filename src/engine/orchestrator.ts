@@ -1,4 +1,5 @@
 import { PriceWatcher } from './watcher.js';
+import { TradeJournal } from './journal.js';
 import { runTradingAgent } from '../agent.js';
 import { sendTelegramAlert, sendTelegramStatus } from '../notifications/telegram.js';
 import type { MarketTicker, WatchCondition, WatchTriggerEvent, WatcherStatus } from '../types.js';
@@ -17,12 +18,14 @@ type TickListener = (symbol: string, price: number) => void;
  */
 export class WatchOrchestrator {
   private readonly watcher: PriceWatcher;
+  public readonly journal: TradeJournal;
   private readonly listeners = new Set<TriggerListener>();
   private readonly tickListeners = new Set<TickListener>();
   private processing = false;
 
-  constructor(baseStreamUrl?: string) {
+  constructor(baseStreamUrl?: string, journal?: TradeJournal) {
     this.watcher = new PriceWatcher(baseStreamUrl);
+    this.journal = journal ?? new TradeJournal();
   }
 
   start(): void {
@@ -77,7 +80,12 @@ export class WatchOrchestrator {
     this.processing = true;
 
     try {
-      const analysis = await runTradingAgent(event.condition.reEvaluationPrompt);
+      const active = this.journal.findActiveTrade(event.condition.symbol);
+      let prompt = event.condition.reEvaluationPrompt;
+      if (active) {
+        prompt += `\n[System Alert: Active ${active.direction} trade exists for ${event.condition.symbol} (Entry: ${active.entryPrice}, SL: ${active.stopLoss}, TP: ${active.takeProfit}). If this hit TP/SL, execute record_trade_outcome with post-mortem critique and lessons learned.]`;
+      }
+      const analysis = await runTradingAgent(prompt, { orchestrator: this });
       await sendTelegramAlert(event, analysis);
       for (const listener of this.listeners) listener(event, analysis);
     } finally {

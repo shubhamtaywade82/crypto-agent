@@ -85,3 +85,35 @@ export interface MarketTicker {
   readonly symbol: string;
   readonly price?: number | undefined;
 }
+
+export type TradeStatus = 'PENDING' | 'OPEN' | 'CLOSED';
+export type TradeOutcome = 'WIN' | 'LOSS' | 'SCRATCH' | 'CANCELLED';
+
+export interface TradeRecord {
+  readonly id: string;
+  readonly symbol: string;
+  readonly strategy: string;
+  readonly direction: 'LONG' | 'SHORT';
+  readonly entryPrice: number;
+  readonly stopLoss: number;
+  readonly takeProfit: number;
+  readonly thesis: string;
+  readonly status: TradeStatus;
+  readonly createdAt: number;
+  readonly openedAt?: number | undefined;
+  readonly closedAt?: number | undefined;
+  readonly exitPrice?: number | undefined;
+  readonly outcome?: TradeOutcome | undefined;
+  readonly pnlPercent?: number | undefined;
+  readonly rMultiple?: number | undefined;
+  readonly postMortem?: string | undefined;
+  readonly lessonLearned?: string | undefined;
+}
+
+export interface LearnedLesson {
+  readonly id: string;
+  readonly symbol: string;
+  readonly lesson: string;
+  readonly context: string;
+  readonly timestamp: number;
+}

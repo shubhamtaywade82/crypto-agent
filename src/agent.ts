@@ -12,6 +12,8 @@ import type { WatchOrchestrator } from './engine/orchestrator.js';
 import { binanceClient, defaultModel, ollamaClient } from './config.js';
 import { createTradingRegistry } from './tools.js';
 
+import type { LearnedLesson } from './types.js';
+
 export interface TradingAgentOptions {
   readonly ollama?: OllamaClient | undefined;
   readonly binance?: BinanceClient | undefined;
@@ -24,7 +26,7 @@ export interface TradingAgentOptions {
 }
 
 const SYSTEM_PROMPT =
-  'You are a crypto market analyst and execution assistant with direct access to public Binance market data. ' +
+  'You are an autonomous crypto market analyst and execution assistant with direct access to public Binance market data. ' +
   '- Use spot_ticker_price or spot_ticker_24hr for current market stats. ' +
   '- Use spot_klines for OHLCV candlestick trend analysis. ' +
   '- Use spot_order_book for liquidity and depth. ' +
@@ -33,10 +35,16 @@ const SYSTEM_PROMPT =
   '- Use register_price_watch to set up live WebSocket price alerts that auto-trigger re-analysis and Telegram notifications. ' +
   '- Use list_active_watches to check currently active price watches. ' +
   '- Use remove_price_watch to cancel a watch by its ID. ' +
-  'AUTONOMOUS PRICE WATCH RULES: ' +
-  'When the user asks to watch or track a coin (even without specific prices), NEVER ask questions or request technical parameters. ' +
-  'Immediately fetch current price and klines, determine the key breakout and breakdown levels, and call register_price_watch automatically. ' +
-  'If the user specifies a target price, compare it against the current price to set type (price_above or price_below) automatically. ' +
+  '- Use log_trade_setup to record planned trade setups with entry, stop loss, take profit, and thesis. ' +
+  '- Use record_trade_outcome to close trades and save post-mortem lessons learned. ' +
+  '- Use get_trade_journal to review past trades and performance stats. ' +
+  '- Use get_learned_rules to check adaptive rules from previous winning and losing trades. ' +
+  'AUTONOMOUS SCANNING & SELF-IMPROVEMENT RULES: ' +
+  '1. When evaluating altcoins (SOL, ETH, XRP), ALWAYS analyze BTCUSDT first as the macro regime filter. ' +
+  '2. Never trade against dominant BTC momentum or market structure. ' +
+  '3. Check get_learned_rules before committing to a setup to avoid repeating past errors. ' +
+  '4. When a setup is identified, call log_trade_setup and register_price_watch for key levels. ' +
+  '5. When a trade exits, critique what worked or failed and extract a concrete, actionable rule. ' +
   'All Binance access is public market data only (no private keys required). ' +
   'Always reason step-by-step and verify data before executing trades.';
 
@@ -132,6 +140,12 @@ const executeReActLoop = async (
   return 'Agent reached maximum iterations without converging.';
 };
 
+const formatAdaptiveLessons = (lessons: readonly LearnedLesson[]): string => {
+  if (lessons.length === 0) return '';
+  const formatted = lessons.map((l) => `• [${l.symbol}] ${l.lesson} (${l.context})`).join('\n');
+  return `\n\nADAPTIVE MEMORY (RULES LEARNED FROM RECENT TRADES):\n${formatted}\nStrictly abide by these rules.`;
+};
+
 export const runTradingAgent = async (
   userPrompt: string,
   options: TradingAgentOptions = {}
@@ -139,9 +153,11 @@ export const runTradingAgent = async (
   const ollama = options.ollama ?? ollamaClient;
   const binance = options.binance ?? binanceClient;
   const registry = createTradingRegistry(binance, options.tools, options.orchestrator);
+  const lessons = options.orchestrator?.journal.getRecentLessons() ?? [];
+  const systemPrompt = SYSTEM_PROMPT + formatAdaptiveLessons(lessons);
 
   return executeReActLoop(ollama, registry, options, [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: userPrompt },
   ]);
 };

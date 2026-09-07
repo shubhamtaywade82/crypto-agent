@@ -14,6 +14,12 @@ import {
   createListWatchesTool,
   createRemoveWatchTool,
 } from './engine/watch-tools.js';
+import {
+  createLogTradeSetupTool,
+  createRecordTradeOutcomeTool,
+  createGetTradeJournalTool,
+  createGetLearnedRulesTool,
+} from './engine/journal-tools.js';
 
 export const adaptBinanceTool = (tool: BinanceToolDefinition, ctx: ToolContext): AnyTool =>
   defineTool({
@@ -147,6 +153,19 @@ export const createPaperBrokerPositionsTool = (): AnyTool =>
     },
   });
 
+const getOrchestratorTools = (orch?: WatchOrchestrator): AnyTool[] => {
+  if (!orch) return [];
+  return [
+    createRegisterWatchTool(orch),
+    createListWatchesTool(orch),
+    createRemoveWatchTool(orch),
+    createLogTradeSetupTool(orch.journal),
+    createRecordTradeOutcomeTool(orch.journal),
+    createGetTradeJournalTool(orch.journal),
+    createGetLearnedRulesTool(orch.journal),
+  ];
+};
+
 export const createTradingRegistry = (
   binance: BinanceClient,
   selectedTools: readonly string[] = CORE_SPOT_TOOLS,
@@ -163,17 +182,13 @@ export const createTradingRegistry = (
     .filter((t) => targetSet.has(t.name))
     .map((t) => adaptBinanceTool(t, ctx));
 
-  const watchTools = orchestrator
-    ? [createRegisterWatchTool(orchestrator), createListWatchesTool(orchestrator), createRemoveWatchTool(orchestrator)]
-    : [];
-
   return new ToolRegistry({
     tools: [
       ...adaptedTools,
       createPositionSizeTool(),
       createPaperBrokerOrderTool(),
       createPaperBrokerPositionsTool(),
-      ...watchTools,
+      ...getOrchestratorTools(orchestrator),
     ],
     // Fail fast on slow exchange network responses
     timeoutMs: 15_000,

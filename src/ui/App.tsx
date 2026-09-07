@@ -7,6 +7,7 @@ import { runTradingAgent } from '../agent.js';
 import { binanceRateLimiter } from '../guardians/rate-limiter.js';
 import { defaultModel } from '../config.js';
 import { WatchOrchestrator } from '../engine/orchestrator.js';
+import { buildScanPrompt } from '../engine/scanner.js';
 import { WatcherPanel } from './WatcherPanel.js';
 import { PromptHistory, usePromptHistoryNavigation } from './history.js';
 
@@ -262,7 +263,8 @@ export const App = (): React.JSX.Element => {
     if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'quit') { exit(); return; }
     history.save(trimmed);
     setInputVal('');
-    void chat.sendMessage(trimmed);
+    const prompt = trimmed === '/scan' || trimmed.toLowerCase() === 'scan' ? buildScanPrompt() : trimmed;
+    void chat.sendMessage(prompt);
   }, [inputVal, chat, exit, history, setInputVal]);
 
   return (

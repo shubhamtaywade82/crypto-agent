@@ -91,4 +91,32 @@ describe('Tool Adapter & Trading Registry with Built-in Binance Tools', () => {
     expect(names).toContain('paper_broker_place_order');
     expect(names).toContain('paper_broker_get_positions');
   });
+
+  it('includes watch and journal tools when orchestrator is passed', () => {
+    const mockBinance = { spot: { market: {}, account: {}, trading: {} } } as unknown as BinanceClient;
+    const mockOrchestrator = {
+      addWatch: vi.fn(),
+      getStatuses: vi.fn().mockReturnValue([]),
+      removeWatch: vi.fn(),
+      journal: {
+        logSetup: vi.fn(),
+        closeTrade: vi.fn(),
+        getTrades: vi.fn().mockReturnValue([]),
+        getStats: vi.fn().mockReturnValue({}),
+        getRecentLessons: vi.fn().mockReturnValue([]),
+        findActiveTrade: vi.fn(),
+      },
+    };
+
+    const registry = createTradingRegistry(mockBinance, [], mockOrchestrator as never);
+    const names = registry.definitions().map((d) => d.function.name);
+
+    expect(names).toContain('register_price_watch');
+    expect(names).toContain('list_active_watches');
+    expect(names).toContain('remove_price_watch');
+    expect(names).toContain('log_trade_setup');
+    expect(names).toContain('record_trade_outcome');
+    expect(names).toContain('get_trade_journal');
+    expect(names).toContain('get_learned_rules');
+  });
 });
