@@ -6,9 +6,16 @@ import { runTradingAgent } from './agent.js';
 import { binanceClient } from './config.js';
 import { getKernel } from './kernel.js';
 import { buildMarketState } from './engines/market-state-engine.js';
+import { ApiAuthenticator, auditCaller } from './security/auth.js';
+import type { AuthVariables } from './security/auth.js';
+import type { Capability } from './security/capabilities.js';
+import { analyticsSnapshot } from './learning/performance-analytics.js';
 
-export const app = new Hono();
+export const app = new Hono<AuthVariables>();
 
+const auth = new ApiAuthenticator();
+
+/** Probe routes stay unauthenticated (load-balancer health checks). */
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: Date.now() }));
 
 app.get('/metrics', (c) =>
@@ -19,39 +26,95 @@ app.get('/metrics', (c) =>
   })
 );
 
-// ---- Kernel v2 endpoints (observability + manual pipeline triggers) ----
+/** Fail-closed gate: when no keys are configured, kernel API is disabled. */
+const guard = (required: Capability): ReturnType<ApiAuthenticator['middleware']> =>
+  auth.middleware(required);
 
-app.get('/api/kernel/state/:symbol', async (c) => {
+// ---- Kernel v3 endpoints (capability-scoped; see src/security) ----
+
+app.get('/api/kernel/state/:symbol', guard('READ_MARKET'), async (c) => {
   const kernel = getKernel();
-  const symbol = c.req.param('symbol').toUpperCase();
+  const symbol = c.req.param('symbol')?.toUpperCase() ?? 'BTCUSDT';
   const mtf = await buildMarketState(kernel.provider, symbol);
   return c.json(mtf.state);
 });
 
-app.get('/api/kernel/portfolio', async (c) => {
+app.get('/api/kernel/portfolio', guard('READ_PORTFOLIO'), async (c) => {
   const kernel = getKernel();
   return c.json(await kernel.portfolio.refresh());
 });
 
-app.get('/api/kernel/events', (c) => {
+app.get('/api/kernel/events', guard('READ_AUDIT'), (c) => {
   const kernel = getKernel();
   const limit = Number(c.req.query('limit') ?? 50);
   return c.json({ events: kernel.store.readAll(limit) });
 });
 
-app.post('/api/kernel/pipeline/:symbol', async (c) => {
+app.post('/api/kernel/pipeline/:symbol', guard('RUN_PIPELINE'), async (c) => {
   const kernel = getKernel();
-  const symbol = c.req.param('symbol').toUpperCase();
+  const symbol = c.req.param('symbol')?.toUpperCase() ?? 'BTCUSDT';
+  auditCaller(kernel.store, c.get('caller'), 'pipeline.run', { symbol });
   const trace = await kernel.lanes.enqueue(symbol, () => kernel.runPipeline(symbol));
   return c.json(trace);
 });
 
-app.get('/api/kernel/orders', (c) => {
+app.get('/api/kernel/orders', guard('READ_AUDIT'), (c) => {
   const kernel = getKernel();
   return c.json({ orders: kernel.execution.listOpen() });
 });
 
-app.get('/api/klines', async (c) => {
+app.get('/api/kernel/killswitch', guard('READ_AUDIT'), (c) => {
+  const kernel = getKernel();
+  return c.json({
+    state: kernel.killSwitch.state,
+    reason: kernel.killSwitch.currentReason,
+    actor: kernel.killSwitch.lastActor,
+    changedAt: kernel.killSwitch.lastChangedAt,
+  });
+});
+
+app.get('/api/kernel/analytics', guard('READ_PORTFOLIO'), (c) => {
+  const kernel = getKernel();
+  const snapshot = analyticsSnapshot(kernel.ledger.outcomes);
+  const strategies = kernel.strategies.all().map((s) => ({
+    strategyId: s.strategyId,
+    version: s.version,
+    status: s.status,
+    promotedAt: s.promotedAt ?? null,
+    retiredAt: s.retiredAt ?? null,
+    gate: s.gate,
+  }));
+  return c.json({
+    ...snapshot,
+    openTrades: kernel.ledger.openTrades.length,
+    strategies,
+  });
+});
+
+app.post('/api/kernel/killswitch/halt', guard('CONTROL_TRADE'), async (c) => {
+  const kernel = getKernel();
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+  const caller = c.get('caller');
+  const reason = body.reason ?? 'halted via API';
+  kernel.killSwitch.halt(reason, caller.keyId);
+  auditCaller(kernel.store, caller, 'killswitch.halt', { reason });
+  return c.json({ state: kernel.killSwitch.state, reason });
+});
+
+app.post('/api/kernel/killswitch/resume', guard('ADMIN'), async (c) => {
+  const kernel = getKernel();
+  const body = (await c.req.json().catch(() => ({}))) as { reason?: string };
+  const caller = c.get('caller');
+  try {
+    kernel.killSwitch.resume(body.reason ?? '', caller.keyId);
+    auditCaller(kernel.store, caller, 'killswitch.resume', { reason: body.reason });
+    return c.json({ state: kernel.killSwitch.state });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+  }
+});
+
+app.get('/api/klines', guard('READ_MARKET'), async (c) => {
   const symbol = (c.req.query('symbol') ?? 'BTCUSDT').toUpperCase();
   const rawKlines = await binanceClient.spot.market.klines(symbol, '1h', { limit: 60 });
   // Map Binance klines to Lightweight Charts { time, open, high, low, close }
@@ -65,7 +128,7 @@ app.get('/api/klines', async (c) => {
   return c.json({ symbol, candles });
 });
 
-app.post('/api/chat', async (c) => {
+app.post('/api/chat', guard('CREATE_INTENT'), async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { prompt?: string };
   const prompt = body.prompt ?? 'Summarize current BTC market';
   const answer = await runTradingAgent(prompt);
@@ -105,7 +168,7 @@ const createStreamHooks = (stream: SSEStream, onTokenSeen: () => void): AgentHoo
   },
 });
 
-app.get('/api/chat/stream', (c) => {
+app.get('/api/chat/stream', guard('CREATE_INTENT'), (c) => {
   const prompt = c.req.query('prompt') ?? 'Summarize current BTC market';
   return streamSSE(c, async (stream) => {
     let hasStreamedToken = false;

@@ -38,6 +38,9 @@ const runOnce = async (): Promise<void> => {
 
 const runHeadless = async (): Promise<void> => {
   const kernel = getKernel();
+  if (kernel.killSwitch.halted && kernel.venue === 'paper') {
+    kernel.killSwitch.resume('paper daemon auto-armed', 'boot');
+  }
   kernel.reconciler.start();
   kernel.log.info('kernel loop starting', { symbols: SYMBOLS, intervalMs: INTERVAL_MS, venue: kernel.venue });
   await runOnce();

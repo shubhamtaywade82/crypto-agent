@@ -23,7 +23,39 @@ export interface PlaceOrderRequest {
   readonly stopLoss?: number;
   readonly takeProfit?: number;
   readonly reduceOnly?: boolean;
+  // ---- execution-quality contract (kernel v3) ----
+  /** Reference price the decision was priced against (USDT). */
+  readonly expectedPrice?: number;
+  /** Max tolerated execution deviation from expectedPrice, in basis points. */
+  readonly maxSlippageBps?: number;
+  /** Strategy identity for audit and per-strategy performance attribution. */
+  readonly strategyId?: string;
+  readonly strategyVersion?: string;
+  /** Decision lineage: the risk decision that authorized this order. */
+  readonly decisionId?: string;
+  /** Entry, exit or reduce intent. */
+  readonly intentType?: 'ENTRY' | 'EXIT' | 'REDUCE';
+  /** Venue time-in-force override (gtc | ioc | fok). */
+  readonly timeInForce?: 'gtc' | 'ioc' | 'fok';
+  /** Post-only (maker) execution request. */
+  readonly postOnly?: boolean;
+  /** Wall-clock expiry: venue must not act on this order after this time. */
+  readonly expiry?: number;
 }
+
+/**
+ * Truthful three-state result of an order lookup at the venue.
+ *
+ * `undefined`-style lookups conflate two very different situations:
+ * the order genuinely not existing (safe to apply missing-order policy)
+ * and the lookup itself failing (safe to do NOTHING). Distinguishing
+ * them is what keeps reconciliation from cancelling live orders during
+ * an exchange outage.
+ */
+export type BrokerLookupResult =
+  | { readonly kind: 'FOUND'; readonly order: BrokerOrder }
+  | { readonly kind: 'NOT_FOUND' }
+  | { readonly kind: 'LOOKUP_FAILED'; readonly reason: string };
 
 export interface BrokerOrder {
   readonly orderId: string;
@@ -69,6 +101,13 @@ export interface IExecutionBroker {
   getInstrument(pair: string): Promise<ContractSpec | undefined>;
   placeOrder(req: PlaceOrderRequest): Promise<BrokerOrder>;
   cancelOrder(pair: string, orderId: string): Promise<void>;
+  /**
+   * Three-state truth lookup. Implementations MUST distinguish
+   * NOT_FOUND (venue answered: no such order) from LOOKUP_FAILED
+   * (venue unreachable / auth / rate limit).
+   */
+  lookupOrder(pair: string, clientOrderId: string): Promise<BrokerLookupResult>;
+  /** Convenience wrapper: FOUND order or undefined (conflates by design). */
   getOrder(pair: string, clientOrderId: string): Promise<BrokerOrder | undefined>;
   getOpenOrders(pair?: string): Promise<readonly BrokerOrder[]>;
   getPositions(pair?: string): Promise<readonly BrokerPosition[]>;

@@ -13,7 +13,8 @@ export type RejectionReason =
   | 'CORRELATED_EXPOSURE_EXCEEDED'
   | 'LOSS_STREAK_EXCEEDED'
   | 'INVALID_PROPOSAL'
-  | 'STALE_MARKET_STATE';
+  | 'STALE_MARKET_STATE'
+  | 'INSTRUMENT_SPEC_UNAVAILABLE';
 
 export interface RiskCheck {
   readonly name: string;

@@ -37,11 +37,11 @@ export const STRATEGIST_SYSTEM =
   'You are a crypto trade strategist. You receive a market snapshot, an analyst read, and ' +
   'RANKED, already-validated candidate setups (each has id, direction, entry, stopLoss, ' +
   'takeProfit, rr, confidence). Choose AT MOST one candidate to execute, or WAIT. ' +
-  'Rules: (1) never trade against the BTC regime; (2) never invent levels — if you execute, ' +
-  'reference the candidate id; (3) stand down when alignment is poor; ' +
+  'Rules: (1) never trade against the BTC regime; (2) to execute, reference the candidate id — ' +
+  'the kernel resolves levels server-side from the canonical candidate and IGNORES any levels ' +
+  'you output; (3) stand down when alignment is poor; ' +
   '(4) EXIT only if an open position thesis is invalidated. ' +
-  `Schema: {"action":"EXECUTE"|"WAIT"|"EXIT","candidateId"?:string,"symbol"?:string,` +
-  `"direction"?:string,"entry"?:number,"stopLoss"?:number,"takeProfit"?:number,` +
+  `Schema: {"action":"EXECUTE"|"WAIT"|"EXIT","candidateId"?:string,` +
   `"confidence":number,"thesis":string,"invalidation":string,"setupType":string}. ${JSON_ONLY}`;
 
 export interface StrategistContext {

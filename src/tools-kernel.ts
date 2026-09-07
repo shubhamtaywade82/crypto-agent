@@ -79,7 +79,7 @@ const createProposeTool = (): AnyTool =>
       const mtf = await buildMarketState(kernel.provider, symbol);
       const state: MarketState = mtf.state;
       const proposal = buildProposal({ ...args, symbol });
-      const assessed = kernel.assess(proposal, state);
+      const assessed = await kernel.assess(proposal, state);
       return {
         decisionId: assessed.risk.decisionId,
         approved: assessed.risk.approved,
@@ -123,7 +123,7 @@ const runApprovedIntent = async (args: ExecuteIntentArgs): Promise<Record<string
     invalidation: 'as approved',
     setupType: 'APPROVED_INTENT',
   });
-  const assessed = kernel.assess(proposal, mtf.state);
+  const assessed = await kernel.assess(proposal, mtf.state);
   if (!assessed.risk.approved) {
     return { executed: false, reason: 're-assessment rejected', decision: assessed.risk };
   }

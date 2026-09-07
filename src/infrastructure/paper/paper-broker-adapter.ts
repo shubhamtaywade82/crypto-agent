@@ -1,5 +1,5 @@
 import type {
-  BrokerBalance, BrokerOrder, BrokerPosition, IExecutionBroker, PlaceOrderRequest,
+  BrokerBalance, BrokerLookupResult, BrokerOrder, BrokerPosition, IExecutionBroker, PlaceOrderRequest,
 } from '../broker/broker.js';
 import type { ContractSpec } from '../../domain/futures/contract-spec.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
@@ -27,6 +27,9 @@ interface PaperPositionState {
   markPrice: number;
   stopLoss?: number;
   takeProfit?: number;
+  /** Order lineage — lets closes be attributed to the originating decision. */
+  decisionId?: string;
+  strategyId?: string;
 }
 
 export interface PaperBrokerConfig {
@@ -34,6 +37,14 @@ export interface PaperBrokerConfig {
   readonly takerFeeRate?: number;
   readonly slippageRate?: number;
   readonly spec?: ContractSpec;
+  /** Observed on every realized position close (drives PerformanceEngine). */
+  readonly onClose?: (close: {
+    readonly pair: string;
+    readonly pnl: number;
+    readonly at: number;
+    readonly decisionId?: string;
+    readonly strategyId?: string;
+  }) => void;
 }
 
 const nextId = (): string => makeId('paper');
@@ -54,12 +65,19 @@ export class PaperExecutionBroker implements IExecutionBroker {
   private readonly takerFee: number;
   private readonly slippage: number;
   private readonly spec?: ContractSpec;
+  private readonly onClose?: PaperBrokerConfig['onClose'];
+  /** Realized PnL ledger — the source for portfolio performance metrics. */
+  readonly realizedCloses: {
+    readonly pair: string; readonly pnl: number; readonly at: number;
+    readonly decisionId?: string; readonly strategyId?: string;
+  }[] = [];
 
   constructor(cfg: PaperBrokerConfig) {
     this.balance = cfg.initialBalance;
     this.takerFee = cfg.takerFeeRate ?? 0.0005;
     this.slippage = cfg.slippageRate ?? 0.0005;
     this.spec = cfg.spec;
+    this.onClose = cfg.onClose;
   }
 
   async getInstrument(): Promise<ContractSpec | undefined> {
@@ -96,7 +114,22 @@ export class PaperExecutionBroker implements IExecutionBroker {
     return this.fill(state, req, fillPrice);
   }
 
+  /** Execution-quality contract: reject fills beyond tolerated deviation. */
+  private slippageBreached(req: PlaceOrderRequest, price: number): boolean {
+    if (req.expectedPrice === undefined || req.maxSlippageBps === undefined ||
+      req.maxSlippageBps <= 0) return false;
+    const bps = req.maxSlippageBps / 10_000;
+    const worst = req.side === 'buy'
+      ? req.expectedPrice * (1 + bps)
+      : req.expectedPrice * (1 - bps);
+    return req.side === 'buy' ? price > worst : price < worst;
+  }
+
   private fill(state: PaperState, req: PlaceOrderRequest, price: number): BrokerOrder {
+    if (this.slippageBreached(req, price)) {
+      state.status = 'REJECTED';
+      return this.view(state);
+    }
     const notional = price * state.quantity;
     const fee = notional * this.takerFee;
     const margin = notional / Math.max(1, req.leverage);
@@ -116,6 +149,7 @@ export class PaperExecutionBroker implements IExecutionBroker {
           positionId: nextId(), pair: state.pair, side, size: state.quantity,
           entryPrice: price, leverage: req.leverage, margin,
           markPrice: price, stopLoss: req.stopLoss, takeProfit: req.takeProfit,
+          decisionId: req.decisionId, strategyId: req.strategyId,
         });
       }
     } else {
@@ -134,6 +168,12 @@ export class PaperExecutionBroker implements IExecutionBroker {
     const closing = Math.min(qty, pos.size);
     this.balance += pnl;
     pos.size -= closing;
+    const close = {
+      pair, pnl, at: Date.now(),
+      decisionId: pos.decisionId, strategyId: pos.strategyId,
+    };
+    this.realizedCloses.push(close);
+    this.onClose?.(close);
     if (pos.size <= 1e-12) this.positions.delete(`${pair}:${side}`);
   }
 
@@ -158,10 +198,20 @@ export class PaperExecutionBroker implements IExecutionBroker {
     if (state && state.status === 'SUBMITTED') state.status = 'CANCELLED';
   }
 
-  async getOrder(pair: string, clientOrderId: string): Promise<BrokerOrder | undefined> {
+  /**
+   * Three-state lookup against the in-memory order book. The simulator
+   * is local and deterministic, so lookups cannot fail: an unknown
+   * client_order_id is a genuine NOT_FOUND.
+   */
+  async lookupOrder(pair: string, clientOrderId: string): Promise<BrokerLookupResult> {
     const state = this.orders.get(clientOrderId);
-    if (!state || state.pair !== pair) return undefined;
-    return this.view(state);
+    if (!state || state.pair !== pair) return { kind: 'NOT_FOUND' };
+    return { kind: 'FOUND', order: this.view(state) };
+  }
+
+  async getOrder(pair: string, clientOrderId: string): Promise<BrokerOrder | undefined> {
+    const result = await this.lookupOrder(pair, clientOrderId);
+    return result.kind === 'FOUND' ? result.order : undefined;
   }
 
   async getOpenOrders(pair?: string): Promise<readonly BrokerOrder[]> {

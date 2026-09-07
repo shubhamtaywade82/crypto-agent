@@ -1,4 +1,4 @@
-import { dec, floorToStep } from '../domain/primitives.js';
+import { dec, floorToStep, ceilToStep } from '../domain/primitives.js';
 import type { TradeDirection } from '../domain/primitives.js';
 import type { ContractSpec } from '../domain/futures/contract-spec.js';
 import type { RiskLimits } from '../domain/risk/risk-config.js';
@@ -39,6 +39,13 @@ const fail = (input: SizingInput, rejection: string, warnings: readonly string[]
   riskAmount: 0, effectiveRiskPerUnit: 0, feePerUnit: 0, fundingPerUnit: 0, warnings,
 });
 
+/** A sizing failure produced before any sizing input exists (e.g. the real instrument spec was unavailable). */
+export const failedSizing = (rejection: string): SizingResult => ({
+  ok: false, rejection, quantity: 0, notional: 0, marginRequired: 0,
+  leverage: 0, riskAmount: 0, effectiveRiskPerUnit: 0, feePerUnit: 0, fundingPerUnit: 0,
+  warnings: [],
+});
+
 interface CostModel {
   readonly feePerUnit: number;
   readonly fundingPerUnit: number;
@@ -71,7 +78,11 @@ const resolveQuantity = (
   }
   let notional = qty.times(entry);
   if (notional.lt(input.spec.minNotional)) {
-    const minQty = floorToStep(dec(input.spec.minNotional).dividedBy(entry), dec(input.spec.lotSize));
+    // MIN NOTIONAL -> ROUND UP TO LOT STEP -> RISK CHECK.
+    // Flooring here could leave the quantity just BELOW the required
+    // minimum; ceiling guarantees the minimum notional is met, and the
+    // budget tolerance check below keeps the bump risk-bounded.
+    const minQty = ceilToStep(dec(input.spec.minNotional).dividedBy(entry), dec(input.spec.lotSize));
     const bumped = minQty.gte(input.spec.minQuantity) ? minQty : dec(input.spec.minQuantity);
     if (bumped.times(costs.effectiveRiskPerUnit).gt(dec(riskBudget).times(1.02))) {
       return 'min notional would exceed risk budget';

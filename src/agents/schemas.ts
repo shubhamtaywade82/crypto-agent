@@ -14,15 +14,16 @@ export const MarketAnalysisSchema = z.object({
 });
 export type MarketAnalysis = z.infer<typeof MarketAnalysisSchema>;
 
-/** Strategist output: choose among validated candidates or stand down. */
+/**
+ * Strategist output: choose among validated candidates or stand down.
+ *
+ * Kernel v3 contract: on EXECUTE the model references a candidateId and
+ * NOTHING else — entry/stop/takeProfit/symbol are resolved server-side
+ * from the canonical candidate. The model never carries trade levels.
+ */
 export const StrategyOutcomeSchema = z.object({
   action: z.enum(['EXECUTE', 'WAIT', 'EXIT']),
   candidateId: z.string().optional(),
-  symbol: z.string().optional(),
-  direction: z.enum(['LONG', 'SHORT']).optional(),
-  entry: z.number().optional(),
-  stopLoss: z.number().optional(),
-  takeProfit: z.number().optional(),
   confidence: z.number().min(0).max(1),
   thesis: z.string().min(5),
   invalidation: z.string().min(3),

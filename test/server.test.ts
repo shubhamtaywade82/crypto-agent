@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { app } from '../src/server.js';
 
+// Runs before module imports: the authenticator parses keys at construction.
+vi.hoisted(() => {
+  process.env.KERNEL_API_KEYS = 'viewer-k:v-secret:viewer,trader-k:t-secret:trader';
+});
+
 vi.mock('../src/agent.js', () => ({
   runTradingAgent: vi.fn().mockResolvedValue('BTC is in an uptrend with strong volume.'),
 }));
@@ -25,15 +30,51 @@ vi.mock('../src/config.js', () => ({
   },
 }));
 
+const authHeaders = (cred: string): Record<string, string> => ({
+  Authorization: `Bearer ${cred}`,
+  'Content-Type': 'application/json',
+});
+
+describe('Hono Server API — security (fail-closed)', () => {
+  it('unauthenticated kernel API requests fail closed with 401', async () => {
+    const res = await app.request('/api/klines?symbol=BTCUSDT');
+    expect(res.status).toBe(401);
+    const portfolio = await app.request('/api/kernel/portfolio');
+    expect(portfolio.status).toBe(401);
+    const pipeline = await app.request('/api/kernel/pipeline/BTCUSDT', { method: 'POST' });
+    expect(pipeline.status).toBe(401);
+  });
+
+  it('wrong secret fails closed with 401', async () => {
+    const res = await app.request('/api/klines?symbol=BTCUSDT', {
+      headers: authHeaders('trader-k:WRONG'),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('insufficient capability fails closed with 403', async () => {
+    // viewer lacks RUN_PIPELINE
+    const res = await app.request('/api/kernel/pipeline/BTCUSDT', {
+      method: 'POST',
+      headers: authHeaders('viewer-k:v-secret'),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string; required: string };
+    expect(body.error).toBe('forbidden');
+    expect(body.required).toBe('RUN_PIPELINE');
+  });
+});
+
 describe('Hono Server API & Streaming Endpoints', () => {
-  it('GET /health returns status ok', async () => {
+
+  it('GET /health returns status ok (public probe)', async () => {
     const res = await app.request('/health');
     expect(res.status).toBe(200);
     const data = (await res.json()) as { status: string };
     expect(data.status).toBe('ok');
   });
 
-  it('GET /metrics returns uptime and memory usage', async () => {
+  it('GET /metrics returns uptime and memory usage (public probe)', async () => {
     const res = await app.request('/metrics');
     expect(res.status).toBe(200);
     const data = (await res.json()) as { uptimeSeconds: number; memoryUsageMb: number };
@@ -42,7 +83,9 @@ describe('Hono Server API & Streaming Endpoints', () => {
   });
 
   it('GET /api/klines returns lightweight-charts formatted candles', async () => {
-    const res = await app.request('/api/klines?symbol=BTCUSDT');
+    const res = await app.request('/api/klines?symbol=BTCUSDT', {
+      headers: authHeaders('viewer-k:v-secret'),
+    });
     expect(res.status).toBe(200);
     const data = (await res.json()) as { symbol: string; candles: Array<{ open: number }> };
     expect(data.symbol).toBe('BTCUSDT');
@@ -52,7 +95,7 @@ describe('Hono Server API & Streaming Endpoints', () => {
   it('POST /api/chat executes agent and returns response', async () => {
     const res = await app.request('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders('trader-k:t-secret'),
       body: JSON.stringify({ prompt: 'Market status' }),
     });
     expect(res.status).toBe(200);

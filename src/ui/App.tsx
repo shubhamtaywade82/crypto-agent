@@ -10,9 +10,10 @@ import { WatchOrchestrator } from '../engine/orchestrator.js';
 import { WatcherPanel } from './WatcherPanel.js';
 import { PromptHistory, usePromptHistoryNavigation } from './history.js';
 import { getKernel, type TradingKernel } from '../kernel.js';
-const DEFAULT_SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT').split(',').map((s) => s.trim().toUpperCase());
 import { deriveCircuitState, type CircuitState } from '../domain/risk/risk-config.js';
 import type { PortfolioState } from '../domain/portfolio/portfolio-state.js';
+
+const DEFAULT_SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT').split(',').map((s) => s.trim().toUpperCase());
 
 const termR = new TerminalRenderer({ showSectionPrefix: false, tab: 2 }) as unknown as InstanceType<typeof Renderer> & {
   text: (tok: unknown) => string; parser: { parseInline: (t: unknown) => string }; o: { text: (t: unknown) => string };
@@ -31,8 +32,7 @@ export const formatToolArgs = (a: unknown): string => {
 export const formatToolResult = (raw: string): string => {
   try {
     const p = JSON.parse(raw) as Record<string, unknown>;
-    if (Array.isArray(p)) return `[${p.length} items]`;
-    const c = p?.error ? `Error: ${String(p.error)}` : JSON.stringify(p);
+    const c = Array.isArray(p) ? `[${p.length} items]` : (p?.error ? `Error: ${String(p.error)}` : JSON.stringify(p));
     return c.length > 70 ? `${c.slice(0, 67)}...` : c;
   } catch {
     const flat = raw.replace(/\s+/g, ' ').trim();
@@ -75,14 +75,16 @@ const Header = ({ collapsed, port, auto }: {
   collapsed: boolean; port: PortfolioState; auto: { enabled: boolean; interval: number };
 }): React.JSX.Element => {
   const kernel = getKernel();
+  const ks = kernel.killSwitch.halted;
   const c = deriveCircuitState(port.dailyLossPercent, port.drawdownPercent, port.lossStreak, kernel.limits);
   const pnl = `${port.dailyRealizedPnl >= 0 ? '+' : ''}$${port.dailyRealizedPnl.toFixed(2)}`;
   const autoTxt = auto.enabled ? `🟢 ON (${Math.round(auto.interval / 60)}m)` : '⚪ OFF';
+  const cTxt = ks ? 'HALTED 🛑' : `${c} ${c === 'NORMAL' ? '🟢' : '⚠️'}`;
   return (
     <Box flexDirection="column">
       <Box justifyContent="space-between">
         <Text bold color="cyan">🤖 Crypto Agent <Text color="gray">({kernel.venue.toUpperCase()})</Text></Text>
-        <Text color="gray" wrap="truncate">Auto: <Text bold color={auto.enabled ? 'green' : 'gray'}>{autoTxt}</Text> │ Circuit: <Text bold color={circuitColor(c)}>{c} {c === 'NORMAL' ? '🟢' : '⚠️'}</Text> │ Rate: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
+        <Text color="gray" wrap="truncate">Auto: <Text bold color={auto.enabled ? 'green' : 'gray'}>{autoTxt}</Text> │ Circuit: <Text bold color={ks ? 'red' : circuitColor(c)}>{cTxt}</Text> │ Rate: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
       </Box>
       <Text color="gray" wrap="truncate">Equity: <Text bold color="white">${port.equity.toFixed(2)}</Text> │ Avail: <Text color="white">${port.availableMargin.toFixed(2)}</Text> │ Daily: <Text color={port.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{pnl}</Text> │ Model: <Text color="yellow">{defaultModel}</Text> │ <Text color="magenta">{collapsed ? '▸ [Ctrl+T]' : '▾ [Ctrl+T]'}</Text></Text>
     </Box>
@@ -155,9 +157,7 @@ const createLiveHooks = (handlers: {
       handlers.setStatus(`Calling ${c.function.name}...`); sync();
     },
     onToolCallEnd: (res): void => {
-      const s = handlers.collector.steps.slice().reverse().find(
-        (x) => x.type === 'tool' && (res.toolCallId ? x.tool.id === res.toolCallId : x.tool.name === res.toolName && !x.tool.result)
-      );
+      const s = handlers.collector.steps.slice().reverse().find((x) => x.type === 'tool' && (res.toolCallId ? x.tool.id === res.toolCallId : x.tool.name === res.toolName && !x.tool.result));
       if (s?.type === 'tool') s.tool.result = formatToolResult(res.outputString);
       sync();
     },
@@ -168,7 +168,8 @@ const formatPipelineTrace = (symbol: string, trace: Awaited<ReturnType<TradingKe
   const setups = trace.setups.length ? trace.setups.map((s) => `${s.type} (RR: ${s.rr.toFixed(2)})`).join(', ') : 'None';
   const sizing = trace.sizing ? `${trace.sizing.quantity} qty ($${trace.sizing.notional.toFixed(2)}, ${trace.sizing.leverage.toFixed(1)}x)` : 'N/A';
   const analyst = trace.analysis ? `${trace.analysis.bias}: ${trace.analysis.summary.slice(0, 80)}` : 'N/A';
-  return `### Multi-Agent Kernel Trace: ${symbol}\n- **Status**: \`${trace.status}\` · **Regime**: \`${trace.regime}\`\n- **Setups**: ${setups}\n- **Analyst**: ${analyst}\n- **Strategist**: \`${trace.outcome?.action ?? 'N/A'}\` (Conf: ${trace.outcome?.confidence ?? 0})\n- **Challenger**: \`${trace.challenge?.verdict ?? 'N/A'}\`\n- **Sizing**: ${sizing}\n- **Order**: ${trace.order?.status ?? 'None'}`;
+  const err = trace.error ? `\n- **Error**: \`${trace.error}\`` : '';
+  return `### Multi-Agent Kernel Trace: ${symbol}\n- **Status**: \`${trace.status}\` · **Regime**: \`${trace.regime}\`\n- **Setups**: ${setups}\n- **Analyst**: ${analyst}\n- **Strategist**: \`${trace.outcome?.action ?? 'N/A'}\` (Conf: ${trace.outcome?.confidence ?? 0})\n- **Challenger**: \`${trace.challenge?.verdict ?? 'N/A'}\`\n- **Sizing**: ${sizing}\n- **Order**: ${trace.order?.status ?? 'None'}${err}`;
 };
 
 const usePipelineTrace = (
@@ -188,17 +189,10 @@ const usePipelineTrace = (
   }, [setBusy, setStatus, addMsg]);
 
   const runKernelScan = useCallback(async (symbols?: readonly string[]): Promise<void> => {
-    const list = symbols && symbols.length > 0 ? symbols : DEFAULT_SYMBOLS;
-    for (const sym of list) await runPipelineTrace(sym);
+    for (const sym of (symbols?.length ? symbols : DEFAULT_SYMBOLS)) await runPipelineTrace(sym);
   }, [runPipelineTrace]);
 
   return { runPipelineTrace, runKernelScan };
-};
-const useTriggerListener = (orchestrator: WatchOrchestrator, runPipeline: (sym: string) => Promise<void>): void => {
-  useEffect(() => {
-    orchestrator.setAgentRunner(async (_prompt, event) => { await runPipeline(event.condition.symbol); return ''; });
-    return (): void => orchestrator.setAgentRunner(undefined);
-  }, [orchestrator, runPipeline]);
 };
 const MAX_CHAT_MESSAGES = 15;
 const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
@@ -224,7 +218,10 @@ const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
   }, [orchestrator, appendMsg]);
 
   const { runPipelineTrace, runKernelScan } = usePipelineTrace(setIsBusy, setStatus, appendMsg);
-  useTriggerListener(orchestrator, runPipelineTrace);
+  useEffect(() => {
+    orchestrator.setAgentRunner(async (_p, ev) => { await runPipelineTrace(ev.condition.symbol); return ''; });
+    return (): void => orchestrator.setAgentRunner(undefined);
+  }, [orchestrator, runPipelineTrace]);
   return { messages, isBusy, status, steps, response, runTurn, runPipelineTrace, runKernelScan, clearMessages, addSystemNote };
 };
 
@@ -256,7 +253,14 @@ const useSubmitHandler = (ctx: SubmitContext): () => void =>
     if (t.toLowerCase() === 'exit' || t.toLowerCase() === 'quit') { ctx.exit(); return; }
     ctx.history.save(t); ctx.setInputVal('');
     if (t === '/clear') { process.stdout.write('\x1b[2J\x1b[3J\x1b[H'); ctx.chat.clearMessages(); return; }
-    if (t === '/help') { ctx.chat.addSystemNote('💡 `/scan [sym]` · `/auto [on|off|<interval>]` · `/pipeline <sym>` · `/portfolio` · `/clear` · `[Ctrl+T]` · `exit`'); return; }
+    if (t === '/help') { ctx.chat.addSystemNote('💡 `/scan [sym]` · `/auto [on|off|<interval>]` · `/pipeline <sym>` · `/halt` · `/resume` · `/portfolio` · `/clear` · `[Ctrl+T]` · `exit`'); return; }
+    if (t.startsWith('/halt') || t.startsWith('/kill') || t.startsWith('/resume')) {
+      const halt = !t.startsWith('/resume');
+      const r = t.split(/\s+/).slice(1).join(' ') || (halt ? 'TUI operator halt' : 'TUI operator resume');
+      if (halt) getKernel().killSwitch.halt(r, 'operator'); else getKernel().killSwitch.resume(r, 'operator');
+      ctx.chat.addSystemNote(halt ? `🛑 Kill switch ENGAGED: ${r}` : `🟢 Kill switch DISENGAGED: ${r}`);
+      return;
+    }
     if (t.startsWith('/auto')) { handleAutoCommand(t.split(/\s+/)[1]?.toLowerCase(), ctx); return; }
     const pSym = t.startsWith('/pipeline') ? t.split(/\s+/)[1]?.toUpperCase() || 'BTCUSDT' : t.startsWith('/scan ') ? t.slice(6).trim().toUpperCase() : null;
     if (pSym) { void ctx.chat.runPipelineTrace(pSym); return; }
@@ -277,20 +281,17 @@ export const App = (): React.JSX.Element => {
   const handleSubmit = useSubmitHandler({ inputVal, setInputVal, chat, history, exit, setAuto });
   useEffect(() => {
     if (!auto.enabled) return undefined;
-    const timer = setInterval(() => {
-      if (!chat.isBusy) void chat.runKernelScan();
-    }, auto.interval * 1000);
-    return (): void => clearInterval(timer);
+    const t = setInterval(() => { if (!chat.isBusy) void chat.runKernelScan(); }, auto.interval * 1000);
+    return (): void => clearInterval(t);
   }, [auto.enabled, auto.interval, chat]);
+  const div = <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>;
   return (
     <Box flexDirection="column" paddingX={1}>
       <Static items={chat.messages as ChatMessage[]}>{(m) => <RenderChatMessage key={m.id} m={m} collapsed={collapsed} />}</Static>
       <LiveTurn busy={chat.isBusy} status={chat.status} steps={chat.steps} response={chat.response} collapsed={collapsed} />
       <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginTop={1}>
-        <Header collapsed={collapsed} port={port} auto={auto} />
-        <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
-        <WatcherPanel orchestrator={orchestrator} />
-        <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
+        <Header collapsed={collapsed} port={port} auto={auto} />{div}
+        <WatcherPanel orchestrator={orchestrator} />{div}
         <PromptInput value={inputVal} busy={chat.isBusy} onSubmit={handleSubmit} onChange={setInputVal} onToggleCollapse={(): void => setCollapsed((c) => !c)} onHistoryUp={handleUp} onHistoryDown={handleDown} />
       </Box>
     </Box>
