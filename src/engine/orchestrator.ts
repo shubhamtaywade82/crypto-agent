@@ -7,6 +7,7 @@ import type { MarketTicker, WatchCondition, WatchTriggerEvent, WatcherStatus } f
 
 type TriggerListener = (event: WatchTriggerEvent, analysis: string) => void;
 type TickListener = (symbol: string, price: number) => void;
+export type AgentRunner = (prompt: string, event: WatchTriggerEvent) => Promise<string>;
 
 /**
  * Orchestrates the full pipeline:
@@ -24,10 +25,15 @@ export class WatchOrchestrator {
   private readonly tickListeners = new Set<TickListener>();
   /** Per-symbol serialized lanes — BTC and SOL no longer block each other. */
   private readonly lanes = new SymbolLanes();
+  private agentRunner?: AgentRunner;
 
   constructor(baseStreamUrl?: string, journal?: TradeJournal) {
     this.watcher = new PriceWatcher(baseStreamUrl);
     this.journal = journal ?? new TradeJournal();
+  }
+
+  setAgentRunner(runner?: AgentRunner): void {
+    this.agentRunner = runner;
   }
 
   start(): void {
@@ -87,7 +93,9 @@ export class WatchOrchestrator {
         if (active) {
           prompt += `\n[System Alert: Active ${active.direction} trade exists for ${event.condition.symbol} (Entry: ${active.entryPrice}, SL: ${active.stopLoss}, TP: ${active.takeProfit}). If this hit TP/SL, execute record_trade_outcome with post-mortem critique and lessons learned.]`;
         }
-        const analysis = await runTradingAgent(prompt, { orchestrator: this });
+        const analysis = await (this.agentRunner
+          ? this.agentRunner(prompt, event)
+          : runTradingAgent(prompt, { orchestrator: this }));
         await sendTelegramAlert(event, analysis);
         for (const listener of this.listeners) listener(event, analysis);
       } catch (err) {

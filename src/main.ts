@@ -4,6 +4,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import React from 'react';
 import { render } from 'ink';
 import { runTradingAgent } from './agent.js';
+import { getKernel } from './kernel.js';
 import { App, formatToolArgs, formatToolResult, renderMarkdown } from './ui/App.js';
 
 import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
@@ -68,9 +69,13 @@ const executeWithStreaming = async (prompt: string): Promise<void> => {
   process.stdout.write('\n');
 };
 
-const startInteractiveRepl = async (): Promise<void> => {
+export const startInteractiveRepl = async (): Promise<void> => {
   if (process.stdin.isTTY) {
     if (!process.env.LOG_LEVEL) process.env.LOG_LEVEL = 'warn';
+    const kernel = getKernel();
+    if (kernel.killSwitch.halted && kernel.venue === 'paper') {
+      kernel.killSwitch.resume('paper mode auto-armed', 'boot');
+    }
     const { waitUntilExit } = render(React.createElement(App), {
       exitOnCtrlC: true,
     });
