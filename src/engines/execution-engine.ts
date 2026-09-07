@@ -32,11 +32,22 @@ export class ExecutionEngine {
   private readonly store: EventStore;
   private readonly log: Logger;
   private readonly orders = new Map<string, TrackedOrder>();
+  /** Optional global gate (kill switch). Returns block reason or null. */
+  private submissionGate: (() => string | null) | undefined;
 
   constructor(broker: IExecutionBroker, store: EventStore, log?: Logger) {
     this.broker = broker;
     this.store = store;
     this.log = log ?? createLogger('execution');
+  }
+
+  /**
+   * Install a global submission gate (defense in depth against the
+   * durable kill switch). While it returns a reason, no new order is
+   * submitted through this engine.
+   */
+  setSubmissionGate(gate: () => string | null): void {
+    this.submissionGate = gate;
   }
 
   get(intentId: string): TrackedOrder | undefined {
@@ -80,6 +91,15 @@ export class ExecutionEngine {
     // audit backbone cannot persist its lifecycle.
     if (!this.store.healthy) {
       throw new Error(`event store unhealthy (last: ${this.store.lastError}); submission blocked`);
+    }
+    // Global gate: the durable kill switch wins over every other path.
+    const blocked = this.submissionGate?.();
+    if (blocked) {
+      this.store.appendClassified({
+        type: 'order.blocked', symbol: tracked.symbol, decisionId: intentId,
+        payload: { reason: blocked },
+      });
+      throw new Error(`submission blocked: ${blocked}`);
     }
     this.transition(tracked, 'SUBMITTING');
     try {

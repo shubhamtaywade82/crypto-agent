@@ -10,6 +10,7 @@ import { resolveCandidate } from './proposal-factory.js';
 import type { ChallengerVerdict, StrategyOutcome } from '../agents/schemas.js';
 import type { SetupCandidate } from './setup-engine.js';
 import type { RiskReservationManager } from './risk-reservations.js';
+import { computeRr } from '../domain/orders/trade-proposal.js';
 
 export interface StageArgs {
   readonly trace: PipelineTrace & { outcome: StrategyOutcome };
@@ -128,12 +129,62 @@ interface ApprovedCtx {
   readonly risk: RiskDecision;
 }
 
+/**
+ * Learning hook: persist the trade's FEATURE SNAPSHOT at execution time
+ * (setup, regime, planned R:R, funding, sizing facts, confidence). The
+ * outcome is attributed back through the same decisionId when the
+ * position realizes — the raw material for per-cell statistics.
+ */
+const recordTradeOpened = (
+  deps: PipelineDeps,
+  ctx: ApprovedCtx
+): void => {
+  const { proposal, sizing, risk, state } = ctx;
+  if (!deps.ledger) return;
+  deps.ledger.recordOpened({
+    decisionId: risk.decisionId,
+    symbol: proposal.symbol,
+    strategyId: proposal.setupType,
+    direction: proposal.direction,
+    entry: proposal.entry,
+    stopLoss: proposal.stopLoss,
+    takeProfit: proposal.takeProfit,
+    plannedRr: computeRr(proposal).rr,
+    regime: state.regime,
+    fundingRate: state.futures.fundingRate,
+    leverage: sizing.leverage,
+    riskAmount: sizing.riskAmount,
+    notional: sizing.notional,
+    confidence: proposal.confidence,
+    openedAt: Date.now(),
+  });
+};
+
+/** Cross-venue gate: reject with audited reasons when venues disagree too much. */
+const crossVenueStage = async (
+  deps: PipelineDeps,
+  proposal: TradeProposal,
+  risk: RiskDecision
+): Promise<boolean> => {
+  if (!deps.crossVenueGate) return true;
+  const verdict = await deps.crossVenueGate(proposal.symbol);
+  if (verdict.tradable) return true;
+  deps.store.append({
+    type: 'risk.rejected', symbol: proposal.symbol, decisionId: risk.decisionId,
+    payload: { reasons: verdict.reasons, source: 'cross_venue' },
+  });
+  return false;
+};
+
 /** Risk-approved path: reserve -> challenge -> execute with reservation lifecycle. */
 const proceedToExecution = async (
   deps: PipelineDeps,
   ctx: ApprovedCtx
 ): Promise<PipelineTrace> => {
   const { assessed, state, portfolio, proposal, sizing, risk } = ctx;
+  if (!(await crossVenueStage(deps, proposal, risk))) {
+    return { ...assessed, status: 'REJECTED' };
+  }
   const reserved = reserveStage({ deps, portfolio, proposal, sizing, risk });
   if (!reserved.ok) return { ...assessed, status: 'REJECTED' };
 
@@ -142,6 +193,7 @@ const proceedToExecution = async (
   if (deps.execute) {
     try {
       const order = await deps.execute(proposal, sizing, risk, reserved.reservationId);
+      recordTradeOpened(deps, ctx);
       settleReservation(deps.reservations, reserved.reservationId, order.status);
       return {
         ...assessed, challenge, status: 'EXECUTED',

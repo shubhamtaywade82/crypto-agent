@@ -117,6 +117,15 @@ Docs: `AGENTS.md` (developer & AI agent guide) · `docs/DEPLOYMENT.md` (server &
   margin, TP/SL triggers, realized-PnL ledger) — no external service required.
 - **Streaming SSE & Dashboard:** Real-time token and thought streaming over Server-Sent
   Events, complete with an embedded dark-mode TradingView Lightweight Charts dashboard.
+- **Capability-scoped API security:** fail-closed authentication (`KERNEL_API_KEYS`),
+  per-key capabilities via `viewer|operator|trader|admin` roles, timing-safe secret
+  comparison, and a durable kill switch (pipeline, execution engine and API all honor it).
+- **Learning loop foundations:** every executed trade persists a feature snapshot and
+  attributes realized outcomes by decisionId; per (setup × regime) cell statistics and
+  pre-registered promotion gates decide when a strategy may trade live.
+- **Cross-venue execution gate:** CoinDCX order book vs Binance reference (basis/spread
+  in bps, staleness health) is checked before risking capital; venue disagreement
+  beyond tolerance rejects the trade.
 - **Dockerized GPU Pipeline:** Multi-stage Alpine container, automatic model catalogue
   verification and pull, NVIDIA GPU passthrough, and persistent model caching.
 
@@ -142,7 +151,7 @@ Ensure Ollama is running locally on port `11434`:
 # Install dependencies
 npm install
 
-# Run test suite (163 tests: unit + property + integration)
+# Run test suite (208 tests: unit + property + integration)
 npm test
 
 # Run linter and typecheck
@@ -153,19 +162,51 @@ npm run typecheck
 npm run dev
 ```
 
+> ⚠️ **Fail-safe boot:** the kill switch boots **HALTED** (and every fresh event store
+> boots HALTED). While halted, pipeline runs return `HALTED` and order submission is
+> refused. Arm trading once with an admin call — it persists across restarts:
+>
+> ```bash
+> curl -X POST http://localhost:3002/api/kernel/killswitch/resume \
+>   -H "Authorization: Bearer boss-1:<admin-secret>" \
+>   -H "Content-Type: application/json" \
+>   -d '{"reason":"initial arming for paper session"}'
+> ```
+
 ---
 
 ## 📡 API Endpoints
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/` | `GET` | Embedded TradingView candlestick chart & streaming chat UI |
-| `/api/chat` | `POST` | Execute ReAct agent turn (`{ "prompt": "..." }`) |
-| `/api/chat/stream` | `GET` | SSE stream for real-time agent thoughts and response tokens (`?prompt=...`) |
-| `/api/klines` | `GET` | Lightweight-charts formatted candlestick data (`?symbol=BTCUSDT`) |
-| `/api/kernel/portfolio` | `GET` | Live canonical-USDT portfolio state (FX provenance included) |
-| `/metrics` | `GET` | Uptime and heap memory statistics |
-| `/health` | `GET` | Service health status |
+All `/api/*` routes are authenticated (`Authorization: Bearer <keyId>:<secret>` or
+`X-Kernel-Key`); with no `KERNEL_API_KEYS` configured they fail closed (401). Probe
+routes (`/health`, `/metrics`) remain public for load balancers.
+
+| Endpoint | Method | Capability | Description |
+|---|---|---|---|
+| `/` | `GET` | — | Embedded TradingView candlestick chart & streaming chat UI |
+| `/api/chat` | `POST` | `CREATE_INTENT` | Execute ReAct agent turn (`{ "prompt": "..." }`) |
+| `/api/chat/stream` | `GET` | `CREATE_INTENT` | SSE stream for agent thoughts and response tokens |
+| `/api/klines` | `GET` | `READ_MARKET` | Lightweight-charts formatted candles (`?symbol=BTCUSDT`) |
+| `/api/kernel/state/:symbol` | `GET` | `READ_MARKET` | Canonical multi-timeframe MarketState |
+| `/api/kernel/portfolio` | `GET` | `READ_PORTFOLIO` | Live canonical-USDT portfolio state (FX provenance) |
+| `/api/kernel/orders` | `GET` | `READ_AUDIT` | Open orders incl. UNKNOWN (reconciler-owned) |
+| `/api/kernel/events` | `GET` | `READ_AUDIT` | Recent audit events (`?limit=50`) |
+| `/api/kernel/pipeline/:symbol` | `POST` | `RUN_PIPELINE` | Trigger the deterministic pipeline for a symbol |
+| `/api/kernel/killswitch` | `GET` | `READ_AUDIT` | Kill-switch state, reason, actor |
+| `/api/kernel/killswitch/halt` | `POST` | `CONTROL_TRADE` | Halt all trading (`{ "reason": "..." }`) |
+| `/api/kernel/killswitch/resume` | `POST` | `ADMIN` | Resume trading (reason mandatory, audited) |
+| `/metrics` | `GET` | — (public) | Uptime and heap memory statistics |
+| `/health` | `GET` | — (public) | Service health status |
+
+### Security configuration
+
+```bash
+# id:secret:role[,id:secret:role...] — roles: viewer | operator | trader | admin
+KERNEL_API_KEYS="ops-1:s3cret:operator,bot-1:s3cret2:trader,boss-1:s3cret3:admin"
+# Cross-venue gate tolerances (bps)
+CROSS_VENUE_MAX_BASIS_BPS=50
+CROSS_VENUE_MAX_SPREAD_BPS=30
+```
 
 ---
 
@@ -176,3 +217,10 @@ npm run dev
    the LLM has no direct order capability.
 3. **Fail-closed everywhere** — invalid proposals, unavailable specs, stale FX and
    failed event persistence all stop trading instead of degrading silently.
+4. **Unauthenticated access is impossible by design** — no `KERNEL_API_KEYS` means no
+   access, never open access; capabilities are per-key, secrets compare timing-safe.
+5. **The kill switch is durable and layered** — while HALTED, the pipeline refuses to
+   run, the execution engine refuses to submit, and it stays HALTED across restarts
+   until an admin resumes with an audited reason.
+6. **Learning never bypasses the gates** — strategy promotion requires the pre-registered
+   statistical gate to pass; nothing else can move a strategy to ACTIVE.

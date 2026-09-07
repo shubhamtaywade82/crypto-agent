@@ -16,6 +16,11 @@ import { ExecutionEngine } from './engines/execution-engine.js';
 import { Reconciler } from './engines/reconciler.js';
 import { RiskReservationManager } from './engines/risk-reservations.js';
 import { SymbolLanes } from './engines/event-bus.js';
+import { KillSwitch } from './security/kill-switch.js';
+import { TradeLedger } from './learning/trade-ledger.js';
+import { StrategyRegistry } from './learning/strategy-registry.js';
+import { CrossVenueGate } from './infrastructure/coindcx/cross-venue-gate.js';
+import { buildExecutor } from './kernel-executor.js';
 import { runTradingPipeline, type PipelineTrace, type PipelineDeps, type StrategyRequest } from './engines/pipeline.js';
 import { analyzeMarket } from './agents/analyst-agent.js';
 import { strategize } from './agents/strategist-agent.js';
@@ -52,17 +57,40 @@ export interface TradingKernel {
   readonly lanes: SymbolLanes;
   readonly store: EventStore;
   readonly log: Logger;
+  /** Durable global trading gate: pipeline + submission refuse while halted. */
+  readonly killSwitch: KillSwitch;
+  /** Learning ledger: feature snapshots + attributed outcomes. */
+  readonly ledger: TradeLedger;
+  /** Strategy registry with pre-registered promotion gates. */
+  readonly strategies: StrategyRegistry;
   runPipeline(symbol: string): Promise<PipelineTrace>;
   assess(proposal: TradeProposal, state: MarketState): Promise<AssessResult>;
   executeProposal(proposal: TradeProposal, sizing: SizingResult, risk: RiskDecision): Promise<TrackedOrder>;
 }
 
-/** Slippage tolerance applied to entry execution (basis points). */
-const maxSlippageBps = (): number => Number(process.env.MAX_SLIPPAGE_BPS ?? 25);
+/** Live cross-venue gate: CoinDCX book vs Binance reference, env-tuned. */
+const buildCrossVenueGate = (client: CoinDCXClient, router: SymbolRouter): CrossVenueGate =>
+  new CrossVenueGate(
+    {
+      client,
+      router,
+      binanceTicker: (symbol: string): Promise<number> =>
+        new BinanceMarketDataProvider(binanceClient).getTickerPrice(symbol),
+    },
+    {
+      maxBasisBps: Number(process.env.CROSS_VENUE_MAX_BASIS_BPS ?? 50),
+      maxSpreadBps: Number(process.env.CROSS_VENUE_MAX_SPREAD_BPS ?? 30),
+    }
+  );
 
 const buildCoinDCXStack = (
   log: Logger
-): { broker: IExecutionBroker; router: SymbolRouter; registry: ContractRegistry } => {
+): {
+  broker: IExecutionBroker;
+  router: SymbolRouter;
+  registry: ContractRegistry;
+  crossVenueGate: (symbol: string) => Promise<{ readonly tradable: boolean; readonly reasons: readonly string[] }>;
+} => {
   const client = new CoinDCXClient({
     apiKey: process.env.COINDCX_API_KEY,
     apiSecret: process.env.COINDCX_API_SECRET,
@@ -75,6 +103,7 @@ const buildCoinDCXStack = (
     ttlMs: Number(process.env.CONTRACT_TTL_MS ?? 5 * 60_000),
     maxStaleMs: Number(process.env.CONTRACT_MAX_STALE_MS ?? 30 * 60_000),
   });
+  const crossVenue = buildCrossVenueGate(client, router);
   log.info('execution venue: coindcx');
   return {
     broker: new CoinDCXExecutionBroker(client, {
@@ -83,78 +112,33 @@ const buildCoinDCXStack = (
     }),
     router,
     registry,
+    crossVenueGate: (symbol: string) => crossVenue.evaluate(symbol),
   };
 };
 
 const buildBroker = (
   venue: ExecutionVenue,
   log: Logger,
-  performance: PerformanceEngine
-): { broker: IExecutionBroker; router?: SymbolRouter; registry?: ContractRegistry } => {
+  performance: PerformanceEngine,
+  ledger: TradeLedger
+): {
+  broker: IExecutionBroker;
+  router?: SymbolRouter;
+  registry?: ContractRegistry;
+  crossVenueGate?: (symbol: string) => Promise<{ readonly tradable: boolean; readonly reasons: readonly string[] }>;
+} => {
   if (venue === 'coindcx') return buildCoinDCXStack(log);
   log.info('execution venue: paper');
   return {
     broker: new PaperExecutionBroker({
       initialBalance: Number(process.env.PAPER_INITIAL_FUTURES_BALANCE ?? 10_000),
-      // Realized closes feed the PerformanceEngine (daily PnL, streaks).
-      onClose: (c) => performance.recordTradeClosed(c.pnl, c.at),
+      // Realized closes feed the PerformanceEngine (daily PnL, streaks)
+      // and the learning ledger (outcome attribution by decisionId).
+      onClose: (c): void => {
+        performance.recordTradeClosed(c.pnl, c.at);
+        if (c.decisionId) ledger.recordClosed(c.decisionId, c.pnl, c.at);
+      },
     }),
-  };
-};
-
-const resolvePair = async (
-  broker: IExecutionBroker,
-  router: SymbolRouter | undefined,
-  symbol: string
-): Promise<string> => {
-  if (broker.id === 'coindcx' && router) return (await router.resolve(symbol)).pair;
-  return `B-${symbol.replace(/USDT$/, '')}_USDT`;
-};
-
-const registerAndSubmit = (
-  execution: ExecutionEngine,
-  args: {
-    readonly pair: string;
-    readonly proposal: TradeProposal;
-    readonly sizing: SizingResult;
-    readonly risk: RiskDecision;
-  }
-): Promise<TrackedOrder> => {
-  const { pair, proposal, sizing, risk } = args;
-  const side = proposal.direction === 'LONG' ? 'buy' : 'sell';
-  execution.registerApproved({
-    intentId: risk.decisionId, pair, symbol: proposal.symbol,
-    side, quantity: sizing.quantity,
-  });
-  return execution.submit(risk.decisionId, {
-    pair, side, orderType: 'market_order',
-    quantity: sizing.quantity, leverage: sizing.leverage,
-    marginType: 'isolated',
-    stopLoss: proposal.stopLoss, takeProfit: proposal.takeProfit,
-    // Execution-quality contract: never allow an unbounded fill.
-    expectedPrice: proposal.entry,
-    maxSlippageBps: maxSlippageBps(),
-    // Audit lineage.
-    strategyId: proposal.setupType,
-    decisionId: risk.decisionId,
-    intentType: 'ENTRY',
-  });
-};
-
-const buildExecutor = (
-  broker: IExecutionBroker,
-  router: SymbolRouter | undefined,
-  execution: ExecutionEngine
-) => {
-  return async (
-    proposal: TradeProposal,
-    sizing: SizingResult,
-    risk: RiskDecision,
-    _reservationId?: string
-  ): Promise<TrackedOrder> => {
-    const pair = await resolvePair(broker, router, proposal.symbol);
-    if (broker instanceof PaperExecutionBroker) broker.setMarkPrice(pair, proposal.entry);
-    return registerAndSubmit(execution, { pair, proposal, sizing, risk });
   };
 };
 
@@ -167,6 +151,12 @@ interface KernelParts {
   readonly challengesEnabled: boolean;
   readonly specFor: (symbol: string) => Promise<ContractSpec>;
   readonly reservations: RiskReservationManager;
+  readonly killSwitch: KillSwitch;
+  readonly ledger: TradeLedger;
+  readonly crossVenueGate?: (symbol: string) => Promise<{
+    readonly tradable: boolean;
+    readonly reasons: readonly string[];
+  }>;
 }
 
 const buildPipelineDeps = (
@@ -190,6 +180,12 @@ const buildPipelineDeps = (
     challengesEnabled: parts.challengesEnabled,
     specFor: parts.specFor,
     reservations: parts.reservations,
+    isTradingAllowed: (): { readonly allowed: boolean; readonly reason?: string } =>
+      parts.killSwitch.halted
+        ? { allowed: false, reason: `kill switch HALTED: ${parts.killSwitch.currentReason}` }
+        : { allowed: true },
+    ledger: parts.ledger,
+    crossVenueGate: parts.crossVenueGate,
     analyze,
     strategize: strategizeFn,
     challenge,
@@ -204,7 +200,43 @@ interface KernelContext {
   readonly router?: SymbolRouter;
   readonly registry?: ContractRegistry;
   readonly performance: PerformanceEngine;
+  readonly ledger: TradeLedger;
+  readonly strategies: StrategyRegistry;
+  readonly crossVenueGate?: (symbol: string) => Promise<{
+    readonly tradable: boolean;
+    readonly reasons: readonly string[];
+  }>;
 }
+
+/** Construct + hydrate the durable state layers, then pick the venue. */
+const buildKernelContext = (
+  venue: ExecutionVenue,
+  store: EventStore,
+  log: Logger
+): KernelContext => {
+  // Performance ledger: closes feed it, portfolio reads it, restarts
+  // hydrate from the event store.
+  const performance = new PerformanceEngine(store);
+  performance.hydrate();
+  // Learning layer: trade ledger + strategy registry replay the log too.
+  const ledger = new TradeLedger(store);
+  ledger.hydrate();
+  const strategies = new StrategyRegistry(store);
+  strategies.hydrate();
+  const { broker, router, registry, crossVenueGate } = buildBroker(venue, log, performance, ledger);
+  return { venue, store, broker, router, registry, performance, ledger, strategies, crossVenueGate };
+};
+
+/** Fail-safe hydrate + defense-in-depth submission gate. */
+const installSafetyGates = (parts: KernelParts): void => {
+  // Unknown/unreadable state stays HALTED (fail-safe default).
+  parts.killSwitch.hydrate();
+  // The execution engine independently refuses new submissions while
+  // the durable kill switch is engaged.
+  parts.execution.setSubmissionGate((): string | null =>
+    parts.killSwitch.halted ? `kill switch HALTED: ${parts.killSwitch.currentReason}` : null
+  );
+};
 
 /** REAL venue specs for live; the paper simulator publishes its own constraints. */
 const buildSpecFor = (
@@ -224,6 +256,8 @@ const buildParts = (ctx: KernelContext): KernelParts => {
   const limits = loadRiskLimits();
   const execution = new ExecutionEngine(ctx.broker, ctx.store);
   return {
+    killSwitch: new KillSwitch(ctx.store),
+    ledger: ctx.ledger,
     provider: new BinanceMarketDataProvider(binanceClient),
     limits,
     store: ctx.store,
@@ -249,24 +283,22 @@ export const createKernel = (venueOverride?: ExecutionVenue): TradingKernel => {
     venueOverride ?? (process.env.EXECUTION_VENUE as ExecutionVenue | undefined) ?? 'paper';
   const store = new EventStore({ durable: venue === 'coindcx' });
 
-  // Performance ledger first: the paper broker closes feed it, the
-  // portfolio engine reads it, restarts hydrate from the event store.
-  const performance = new PerformanceEngine(store);
-  performance.hydrate();
-
-  const { broker, router, registry } = buildBroker(venue, log, performance);
-  const ctx: KernelContext = { venue, store, broker, router, registry, performance };
+  const ctx = buildKernelContext(venue, store, log);
   const parts = buildParts(ctx);
-  const reconciler = new Reconciler(broker, parts.execution, parts.store);
-  const deps = buildPipelineDeps(parts, ollamaClient, router, broker);
+  installSafetyGates(parts);
+  const reconciler = new Reconciler(ctx.broker, parts.execution, parts.store);
+  const deps = buildPipelineDeps(parts, ollamaClient, ctx.router, ctx.broker);
   const assess = (proposal: TradeProposal, state: MarketState): Promise<AssessResult> =>
     assessProposal(deps, proposal, state);
   const executor = deps.execute as NonNullable<typeof deps.execute>;
 
   return {
-    venue, provider: parts.provider, broker, router, limits: parts.limits,
-    portfolio: parts.portfolio, performance, reservations: parts.reservations, registry,
-    execution: parts.execution, reconciler,
+    venue, provider: parts.provider, broker: ctx.broker, router: ctx.router,
+    limits: parts.limits,
+    portfolio: parts.portfolio, performance: ctx.performance,
+    reservations: parts.reservations, registry: ctx.registry,
+    execution: parts.execution, reconciler, killSwitch: parts.killSwitch,
+    ledger: ctx.ledger, strategies: ctx.strategies,
     lanes: new SymbolLanes(), store: parts.store, log,
     runPipeline: (symbol: string): Promise<PipelineTrace> => runTradingPipeline(deps, symbol),
     assess,

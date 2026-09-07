@@ -27,6 +27,9 @@ interface PaperPositionState {
   markPrice: number;
   stopLoss?: number;
   takeProfit?: number;
+  /** Order lineage — lets closes be attributed to the originating decision. */
+  decisionId?: string;
+  strategyId?: string;
 }
 
 export interface PaperBrokerConfig {
@@ -35,7 +38,13 @@ export interface PaperBrokerConfig {
   readonly slippageRate?: number;
   readonly spec?: ContractSpec;
   /** Observed on every realized position close (drives PerformanceEngine). */
-  readonly onClose?: (close: { readonly pair: string; readonly pnl: number; readonly at: number }) => void;
+  readonly onClose?: (close: {
+    readonly pair: string;
+    readonly pnl: number;
+    readonly at: number;
+    readonly decisionId?: string;
+    readonly strategyId?: string;
+  }) => void;
 }
 
 const nextId = (): string => makeId('paper');
@@ -58,7 +67,10 @@ export class PaperExecutionBroker implements IExecutionBroker {
   private readonly spec?: ContractSpec;
   private readonly onClose?: PaperBrokerConfig['onClose'];
   /** Realized PnL ledger — the source for portfolio performance metrics. */
-  readonly realizedCloses: { readonly pair: string; readonly pnl: number; readonly at: number }[] = [];
+  readonly realizedCloses: {
+    readonly pair: string; readonly pnl: number; readonly at: number;
+    readonly decisionId?: string; readonly strategyId?: string;
+  }[] = [];
 
   constructor(cfg: PaperBrokerConfig) {
     this.balance = cfg.initialBalance;
@@ -137,6 +149,7 @@ export class PaperExecutionBroker implements IExecutionBroker {
           positionId: nextId(), pair: state.pair, side, size: state.quantity,
           entryPrice: price, leverage: req.leverage, margin,
           markPrice: price, stopLoss: req.stopLoss, takeProfit: req.takeProfit,
+          decisionId: req.decisionId, strategyId: req.strategyId,
         });
       }
     } else {
@@ -155,7 +168,10 @@ export class PaperExecutionBroker implements IExecutionBroker {
     const closing = Math.min(qty, pos.size);
     this.balance += pnl;
     pos.size -= closing;
-    const close = { pair, pnl, at: Date.now() };
+    const close = {
+      pair, pnl, at: Date.now(),
+      decisionId: pos.decisionId, strategyId: pos.strategyId,
+    };
     this.realizedCloses.push(close);
     this.onClose?.(close);
     if (pos.size <= 1e-12) this.positions.delete(`${pair}:${side}`);

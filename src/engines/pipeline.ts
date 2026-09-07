@@ -22,6 +22,7 @@ import type { EventStore } from '../infrastructure/events/event-store.js';
 import type { ExecutionEngine, TrackedOrder } from './execution-engine.js';
 import type { PortfolioEngine } from './portfolio-engine.js';
 import type { RiskReservationManager } from './risk-reservations.js';
+import type { TradeLedger } from '../learning/trade-ledger.js';
 import type { ContractSpec } from '../domain/futures/contract-spec.js';
 import { makeId } from '../domain/primitives.js';
 
@@ -49,6 +50,24 @@ export interface PipelineDeps {
   readonly specFor: (symbol: string) => Promise<ContractSpec>;
   /** Global risk reservations (concurrency-safe portfolio accounting). */
   readonly reservations?: RiskReservationManager;
+  /**
+   * Durable global trading gate (kill switch). When it reports blocked,
+   * the pipeline returns status HALTED before consuming any LLM tokens
+   * or touching the venue.
+   */
+  readonly isTradingAllowed?: () => { readonly allowed: boolean; readonly reason?: string };
+  /** Learning ledger: feature snapshots in, outcomes attributed back. */
+  readonly ledger?: TradeLedger;
+  /**
+   * Cross-venue execution gate (optional). When present, consulted right
+   * before risking capital: basis/spread/health beyond tolerance rejects
+   * the trade (REJECTED, source cross_venue) — never silently executes
+   * across a distorted venue pair.
+   */
+  readonly crossVenueGate?: (symbol: string) => Promise<{
+    readonly tradable: boolean;
+    readonly reasons: readonly string[];
+  }>;
   readonly analyze: (state: MarketState) => Promise<MarketAnalysis>;
   readonly strategize: (request: StrategyRequest) => Promise<StrategyOutcome>;
   readonly challenge?: (
@@ -66,7 +85,8 @@ export interface PipelineDeps {
 
 export type PipelineStatus =
   | 'NO_SETUPS' | 'WAIT' | 'EXIT_SIGNALLED'
-  | 'INVALID_PROPOSAL' | 'REJECTED' | 'APPROVED' | 'EXECUTED' | 'ERROR';
+  | 'INVALID_PROPOSAL' | 'REJECTED' | 'APPROVED' | 'EXECUTED' | 'ERROR'
+  | 'HALTED';
 
 export interface PipelineTrace {
   readonly symbol: string;
@@ -88,6 +108,13 @@ export interface PipelineTrace {
 
 const stateAge = (state: MarketState): number => Date.now() - state.capturedAt;
 
+const haltedTrace = (deps: PipelineDeps, symbol: string): PipelineTrace => {
+  const gate = deps.isTradingAllowed?.();
+  const reason = gate?.allowed === false ? (gate.reason ?? 'trading halted') : 'trading halted';
+  deps.store.append({ type: 'pipeline.halted', symbol, payload: { reason } });
+  return { symbol, ranAt: Date.now(), status: 'HALTED', regime: 'UNKNOWN', setups: [], error: reason };
+};
+
 /** Live portfolio truth for this run; degrade to peek() if the venue fails. */
 const refreshPortfolio = async (
   deps: PipelineDeps,
@@ -105,22 +132,38 @@ const refreshPortfolio = async (
   }
 };
 
+/** Market data + setup detection: the shared pre-strategy stage. */
+const gatherMarketContext = async (
+  deps: PipelineDeps,
+  symbol: string
+): Promise<{ mtf: MtfResult; setups: ReturnType<typeof detectSetups> }> => {
+  const mtf: MtfResult = await buildMarketState(deps.provider, symbol);
+  // Feed the learning ledger's MAE/MFE trackers with the fresh mark.
+  deps.ledger?.recordMark(symbol, mtf.state.price.mark);
+  const setups = detectSetups(mtf, deps.limits);
+  const state = mtf.state;
+  deps.store.append({
+    type: 'pipeline.snapshot', symbol,
+    payload: { regime: state.regime, setups: setups.length, btc: state.btcRegime },
+  });
+  return { mtf, setups };
+};
+
 export const runTradingPipeline = async (
   deps: PipelineDeps,
   symbol: string
 ): Promise<PipelineTrace> => {
   try {
+    // Kill switch first: no market data, no LLM calls, no risk work.
+    if (deps.isTradingAllowed && !deps.isTradingAllowed().allowed) {
+      return haltedTrace(deps, symbol);
+    }
     const portfolio = await refreshPortfolio(deps, symbol);
-    const mtf: MtfResult = await buildMarketState(deps.provider, symbol);
+    const { mtf, setups } = await gatherMarketContext(deps, symbol);
     const state = mtf.state;
-    const setups = detectSetups(mtf, deps.limits);
     const base: PipelineTrace = {
       symbol, ranAt: Date.now(), status: 'NO_SETUPS', regime: state.regime, state, setups,
     };
-    deps.store.append({
-      type: 'pipeline.snapshot', symbol,
-      payload: { regime: state.regime, setups: setups.length, btc: state.btcRegime },
-    });
     if (setups.length === 0) return base;
 
     const analysis = await deps.analyze(state);

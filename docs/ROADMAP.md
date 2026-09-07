@@ -79,8 +79,12 @@ integrity, portfolio accounting, execution reconciliation truth, and concurrency
       ready for runtime wiring
 - [x] Pipeline refreshes live portfolio state every run (no more trading on stale/zero
       fallback equity)
+- [x] `CrossVenueState` wired into the live pipeline gate: `CrossVenueGate` reads the
+      CoinDCX futures order book vs the Binance reference ticker (INR pairs normalized
+      through the routed FX rate) and rejects execution when basis/spread/health exceed
+      env-tuned tolerances (`CROSS_VENUE_MAX_BASIS_BPS`, `CROSS_VENUE_MAX_SPREAD_BPS`);
+      snapshot failures fail safe (no new risk)
 - [ ] CoinDCX fills ledger → realized PnL for the LIVE venue (paper is complete)
-- [ ] Wire `CrossVenueState` into the live pipeline gate (module + tests ready)
 - [ ] Private WS streams to drive the FSM push-based (see Phase 2 open items)
 
 **Acceptance:** concurrent same-moment approvals on two symbols cannot exceed
@@ -112,32 +116,55 @@ reconciliation leaves every tracked order in its pre-outage state (tested); equi
 - [x] Policy Gate wired into tools (`propose_trade` → `execute_approved_intent`)
 - [x] `paper_broker_place_order` risk-gated (SL/TP required, size computed by kernel)
 - [x] Per-symbol lanes replace global processing lock
-- [ ] Tool capability scopes per role (READ_MARKET / CREATE_INTENT / EXECUTE)
+- [x] Tool capability scopes per role (READ_MARKET / CREATE_INTENT / EXECUTE) — enforced
+      at the API boundary by `src/security` (viewer/operator/trader/admin presets); the
+      agent's tool layer never gains capabilities the authenticated caller lacks
 - [ ] Agent state machine with explicit session context compilation
 
 **Acceptance:** a prompt-injected strategist cannot exceed risk limits — fuzz the role
 outputs through the pipeline and assert zero unapproved orders.
 
-## Phase 5 — Learning (next highest leverage)
+## Phase 5 — Learning ✅ core (this branch)
 
-- [ ] Trade feature extraction (setup type, regime, alignment, MAE/MFE, funding at entry)
-- [ ] Outcome store keyed by decisionId (event store replay → trade ledger)
-- [ ] Grouping + statistics (expectancy per setup×regime cell, R distributions)
+- [x] Trade feature extraction: every executed trade persists a feature snapshot
+      (`trade.opened`: setup type, regime, direction, planned R:R, funding at entry,
+      leverage, risk amount, notional, strategist confidence) keyed by decisionId
+- [x] Outcome store: paper-venue realized closes carry order lineage (decisionId /
+      strategyId) and attribute back by decisionId (`trade.closed`) — the ledger fully
+      rebuilds from event-log replay; MAE/MFE tracked in R from mark observations
+- [x] Grouping + statistics: per (setup × regime) cell statistics — expectancy in R,
+      win rate, profit factor, dispersion, t-statistic, worst/best R, mean MAE/MFE
+- [x] Strategy registry with versions and status (CANDIDATE/ACTIVE/RETIRED) and
+      PRE-REGISTERED promotion gates (min sample, min expectancy, min win rate, min |t|,
+      worst-R floor) — gates are frozen at registration, evaluated per cell, and every
+      promotion/retirement is a persisted audit event
+- [x] Registry + ledger hydrated at kernel boot; exposed on the kernel API surface
 - [ ] Rule candidates → backtest → walk-forward (train/validate/OOS) → paper → promote
-- [ ] Strategy registry with versions, status (CANDIDATE/ACTIVE/RETIRED), promotion criteria
 - [ ] Wire journal lessons + strategy status into strategist context
 
-**Acceptance:** a rule affects live behavior only after surviving walk-forward OOS with
-pre-registered thresholds; every ACTIVE strategy reports expectancy, sample size, and
-last-promoted-at.
+**Acceptance:** a rule affects live behavior only after surviving the gate that was
+declared before the outcomes were observed; every ACTIVE strategy reports expectancy,
+sample size, and last-promoted-at (all persisted events, replayable).
 
-## Phase 6 — Production
+## Phase 6 — Production — security core ✅ (this branch)
 
-- [ ] API authentication + authorization (the Hono surface is currently unauthenticated)
+- [x] API authentication + authorization: fail-closed Hono middleware — bearer
+      `keyId:secret` credentials (timing-safe compare), per-key capability sets
+      (READ_MARKET / READ_PORTFOLIO / READ_AUDIT / RUN_PIPELINE / CREATE_INTENT /
+      EXECUTE / CONTROL_TRADE / ADMIN) via `viewer|operator|trader|admin` role presets
+      from `KERNEL_API_KEYS`; with NO keys configured every kernel route returns 401
+      (never open access); probe routes (`/health`, `/metrics`) stay public
+- [x] Kill switch: durable global trading gate — boots HALTED (fail-safe), `halt()`/
+      `resume()` persist `killswitch.set` events (actor + reason mandatory for resume),
+      hydration replays history; enforced at THREE layers: pipeline returns `HALTED`
+      before market data/LLM/venue work, execution engine refuses submissions
+      (defense in depth, audited `order.blocked`), and API endpoints are
+      capability-scoped (`CONTROL_TRADE` to halt, `ADMIN` to resume)
+- [x] Privileged API calls are audited (`api.call` events: keyId, role, action)
 - [ ] Secret management (no raw env keys for live venue), key scoping, rotation runbook
 - [ ] Health/readiness probes, metrics backend, tracing, alerting (HALTED state pages)
 - [ ] Fault-tolerance modes per dependency (Binance down = degraded data; CoinDCX down =
-      no new risk; DB down = halted)
+      no new risk — cross-venue gate now enforces the CoinDCX half)
 - [ ] Chaos suite: WS drop, REST timeout, partial fill, exchange 5xx, reconcile storm
 - [ ] Replay from event store (post-incident reconstruction of any decision)
 
