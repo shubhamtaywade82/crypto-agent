@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import type { WatchOrchestrator } from '../engine/orchestrator.js';
 import type { MarketTicker, WatcherStatus, WatchTriggerEvent } from '../types.js';
+import { getKernel } from '../kernel.js';
+import type { BrokerPosition } from '../infrastructure/broker/broker.js';
 
 interface TriggerLog { readonly symbol: string; readonly price: number; readonly time: string; }
 
@@ -25,32 +27,47 @@ interface WatcherData {
   readonly statuses: WatcherStatus[];
   readonly triggers: TriggerLog[];
   readonly tickers: MarketTicker[];
+  readonly positions: readonly BrokerPosition[];
 }
 
 const useWatcherData = (orchestrator: WatchOrchestrator): WatcherData => {
   const [statuses, setStatuses] = useState<WatcherStatus[]>([]);
   const [triggers, setTriggers] = useState<TriggerLog[]>([]);
   const [tickers, setTickers] = useState<MarketTicker[]>([]);
+  const [positions, setPositions] = useState<readonly BrokerPosition[]>([]);
 
   useEffect(() => {
-    const refresh = (): void => {
+    let mounted = true;
+    const refresh = async (): Promise<void> => {
+      if (!mounted) return;
       setStatuses(orchestrator.getStatuses());
       setTickers(orchestrator.getMarketTickers());
+      try {
+        const kernel = getKernel();
+        const pos = await kernel.broker.getPositions();
+        if (mounted) setPositions(pos);
+      } catch { /* broker read failure ignored in UI */ }
     };
-    refresh();
-    orchestrator.onTick(refresh);
-    const poll = setInterval(refresh, 1000);
-    const onTrigger = (event: WatchTriggerEvent): void => {
+
+    void refresh();
+    // Throttled 1-second interval eliminates CPU/heap spikes from high-frequency ticks
+    const poll = setInterval(() => { void refresh(); }, 1000);
+    const unsubTrigger = orchestrator.onTrigger((event: WatchTriggerEvent) => {
+      if (!mounted) return;
       setTriggers((prev) => [
         { symbol: event.condition.symbol, price: event.currentPrice, time: formatTriggerTime(event.triggeredAt) },
         ...prev,
       ].slice(0, 5));
+    });
+
+    return (): void => {
+      mounted = false;
+      clearInterval(poll);
+      unsubTrigger();
     };
-    orchestrator.onTrigger(onTrigger);
-    return (): void => clearInterval(poll);
   }, [orchestrator]);
 
-  return { statuses, triggers, tickers };
+  return { statuses, triggers, tickers, positions };
 };
 
 const MarketTickerBar = ({ tickers }: { tickers: MarketTicker[] }): React.JSX.Element => (
@@ -65,6 +82,39 @@ const MarketTickerBar = ({ tickers }: { tickers: MarketTicker[] }): React.JSX.El
     ))}
   </Box>
 );
+
+const PositionsBar = ({ positions }: { positions: readonly BrokerPosition[] }): React.JSX.Element => {
+  if (positions.length === 0) {
+    return (
+      <Box gap={1}>
+        <Text color="gray">📊 <Text bold color="cyan">Positions (0/2):</Text> No active positions (risk cap: 0.25%/trade · min 2.5 RR)</Text>
+      </Box>
+    );
+  }
+  return (
+    <Box flexDirection="column">
+      <Text color="gray">📊 <Text bold color="cyan">Positions ({positions.length}/2):</Text></Text>
+      {positions.map((p, idx) => {
+        const upnl = p.unrealizedPnl ?? 0;
+        const isProfit = upnl >= 0;
+        const notional = Math.abs(p.size * p.entryPrice);
+        const pnlPct = notional > 0 ? (upnl / notional) * 100 : 0;
+        const key = p.positionId || `${p.pair}-${idx}`;
+        return (
+          <Text key={key} color="gray">
+            {'  '}{p.side === 'long' ? '🟢' : '🔴'} <Text bold color="white">{p.pair}</Text>{' '}
+            <Text color={p.side === 'long' ? 'green' : 'red'}>{p.side.toUpperCase()} {p.size}</Text>{' '}
+            @ <Text color="white">${p.entryPrice.toFixed(2)}</Text>{' '}
+            {p.markPrice ? <Text color="gray">(Mark: ${p.markPrice.toFixed(2)}) </Text> : null}
+            │ PnL: <Text bold color={isProfit ? 'green' : 'red'}>
+              {isProfit ? '+' : ''}${upnl.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)
+            </Text>
+          </Text>
+        );
+      })}
+    </Box>
+  );
+};
 
 const WatchItem = ({ w }: { w: WatcherStatus }): React.JSX.Element => {
   const isClose = w.currentPrice !== undefined
@@ -113,10 +163,11 @@ const TriggerList = ({ triggers }: { triggers: TriggerLog[] }): React.JSX.Elemen
 );
 
 export const WatcherPanel = ({ orchestrator }: { orchestrator: WatchOrchestrator }): React.JSX.Element => {
-  const { statuses, triggers, tickers } = useWatcherData(orchestrator);
+  const { statuses, triggers, tickers, positions } = useWatcherData(orchestrator);
   return (
     <Box flexDirection="column" marginY={1}>
       <MarketTickerBar tickers={tickers} />
+      <PositionsBar positions={positions} />
       {statuses.length > 0 && <WatchList statuses={statuses} />}
       {triggers.length > 0 && <TriggerList triggers={triggers} />}
     </Box>

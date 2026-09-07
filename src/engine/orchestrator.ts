@@ -62,12 +62,14 @@ export class WatchOrchestrator {
     return this.watcher.getMarketTickers();
   }
 
-  onTrigger(listener: TriggerListener): void {
+  onTrigger(listener: TriggerListener): () => void {
     this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
-  onTick(listener: TickListener): void {
+  onTick(listener: TickListener): () => void {
     this.tickListeners.add(listener);
+    return () => this.tickListeners.delete(listener);
   }
 
   stop(): void {

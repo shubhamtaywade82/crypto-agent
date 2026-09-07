@@ -51,7 +51,7 @@ export class PriceWatcher extends EventEmitter {
       this.handleTick(data as WsPriceData);
     });
     for (const sym of CORE_MARKET_SYMBOLS) this.subscribedSymbols.add(sym);
-    this.ws.subscribe(CORE_MARKET_SYMBOLS.map((s) => this.ws.trade(s)));
+    this.ws.subscribe(CORE_MARKET_SYMBOLS.map((s) => this.ws.miniTicker(s)));
   }
 
   addWatch(condition: WatchCondition): void {
@@ -59,7 +59,7 @@ export class PriceWatcher extends EventEmitter {
     const sym = condition.symbol.toUpperCase();
     if (!this.subscribedSymbols.has(sym)) {
       this.subscribedSymbols.add(sym);
-      this.ws.subscribe([this.ws.trade(sym)]);
+      this.ws.subscribe([this.ws.miniTicker(sym)]);
     }
   }
 

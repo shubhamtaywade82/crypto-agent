@@ -10,108 +10,100 @@ import { WatchOrchestrator } from '../engine/orchestrator.js';
 import { buildScanPrompt } from '../engine/scanner.js';
 import { WatcherPanel } from './WatcherPanel.js';
 import { PromptHistory, usePromptHistoryNavigation } from './history.js';
+import { getKernel } from '../kernel.js';
+import { deriveCircuitState, type CircuitState } from '../domain/risk/risk-config.js';
+import type { PortfolioState } from '../domain/portfolio/portfolio-state.js';
 
-const terminalRenderer = new TerminalRenderer({ showSectionPrefix: false, tab: 2 }) as unknown as InstanceType<
+const termR = new TerminalRenderer({ showSectionPrefix: false, tab: 2 }) as unknown as InstanceType<
   typeof Renderer
-> & { text: (token: unknown) => string; parser: { parseInline: (t: unknown) => string }; o: { text: (t: unknown) => string } };
+> & { text: (tok: unknown) => string; parser: { parseInline: (t: unknown) => string }; o: { text: (t: unknown) => string } };
 
-// marked-terminal misses inner tokens on text tokens in marked v15 tight lists
-terminalRenderer.text = function (tok: unknown): string {
+termR.text = function (tok: unknown): string {
   if (tok && typeof tok === 'object' && 'tokens' in tok && tok.tokens) return this.parser.parseInline(tok.tokens);
   return this.o.text(typeof tok === 'object' && tok && 'text' in tok ? (tok as { text: unknown }).text : tok);
 };
-
-// Override hr to prevent 1-character wrap in Ink's padded container
-terminalRenderer.hr = (): string => {
-  const cols = process.stdout.columns || 80;
-  return `\n${'─'.repeat(Math.max(20, cols - 4))}\n\n`;
-};
-
-marked.setOptions({ renderer: terminalRenderer as unknown as InstanceType<typeof Renderer> });
-
-export const renderMarkdown = (text: string): string => {
-  if (!text) return '';
-  try { return (marked.parse(text) as string).trim(); } catch { return text; }
+termR.hr = (): string => `\n${'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 4))}\n\n`;
+marked.setOptions({ renderer: termR as unknown as InstanceType<typeof Renderer> });
+export const renderMarkdown = (t: string): string => {
+  try { return t ? (marked.parse(t) as string).trim() : ''; } catch { return t; }
 };
 
 export const formatToolArgs = (args: unknown): string => {
   if (!args || (typeof args === 'object' && Object.keys(args).length === 0)) return '';
-  const str = (typeof args === 'string' ? args : JSON.stringify(args)).replace(/\s+/g, ' ').trim();
-  return str.length > 50 ? `${str.slice(0, 47)}...` : str;
+  const s = (typeof args === 'string' ? args : JSON.stringify(args)).replace(/\s+/g, ' ').trim();
+  return s.length > 50 ? `${s.slice(0, 47)}...` : s;
 };
 
 export const formatToolResult = (raw: string): string => {
   const flat = raw.replace(/\s+/g, ' ').trim();
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) return `[${parsed.length} items]`;
-    if (parsed && typeof parsed === 'object') {
-      if ('error' in parsed) return `Error: ${String((parsed as Record<string, unknown>).error)}`;
-      const c = JSON.stringify(parsed);
+    const p = JSON.parse(raw) as unknown;
+    if (Array.isArray(p)) return `[${p.length} items]`;
+    if (p && typeof p === 'object') {
+      if ('error' in p) return `Error: ${String((p as Record<string, unknown>).error)}`;
+      const c = JSON.stringify(p);
       return c.length > 70 ? `${c.slice(0, 67)}...` : c;
     }
-  } catch { /* fallback to flat string */ }
+  } catch { /* fallback */ }
   return flat.length > 70 ? `${flat.slice(0, 67)}...` : flat;
 };
 
 export const formatThoughtPreview = (text: string): string => {
-  const trimmed = text.trim();
-  const first = (trimmed.split('\n')[0] ?? '').replace(/\s+/g, ' ');
-  const count = trimmed.split('\n').filter(Boolean).length;
-  return `▸ 🧠 Thought: ${first.length > 60 ? `${first.slice(0, 57)}...` : first} (${count} lines)`;
+  const tr = text.trim();
+  const f = (tr.split('\n')[0] ?? '').replace(/\s+/g, ' ');
+  return `▸ 🧠 Thought: ${f.length > 60 ? `${f.slice(0, 57)}...` : f} (${tr.split('\n').filter(Boolean).length} lines)`;
 };
 
 export interface ToolEntry { id?: string; name: string; args: unknown; result?: string; }
 export interface ThoughtStep { type: 'thought'; content: string; }
 export interface ToolStep { type: 'tool'; tool: ToolEntry; }
 export type AgentStep = ThoughtStep | ToolStep;
-interface ChatMessage { id: string; role: 'user' | 'agent'; content: string; steps?: AgentStep[]; }
+interface ChatMessage { id: string; role: 'user' | 'agent' | 'system'; content: string; steps?: AgentStep[]; }
 interface TurnCollector { steps: AgentStep[]; }
-
-interface ChatHandlers {
-  collector: TurnCollector; setStatus: (s: string) => void;
-  setSteps: React.Dispatch<React.SetStateAction<AgentStep[]>>; setResponse: React.Dispatch<React.SetStateAction<string>>;
-}
-
 interface AgentChatState {
-  messages: ChatMessage[]; isBusy: boolean; status: string;
-  steps: AgentStep[]; response: string; sendMessage: (prompt: string) => Promise<void>;
+  readonly messages: readonly ChatMessage[]; readonly isBusy: boolean; readonly status: string;
+  readonly steps: readonly AgentStep[]; readonly response: string;
+  sendMessage: (text: string) => Promise<void>; clearMessages: () => void; addSystemNote: (msg: string) => void;
 }
 
-interface LiveTurnProps {
-  busy: boolean; status: string; steps: AgentStep[]; response: string; collapsed: boolean;
-}
-
-interface InputProps {
-  value: string; busy: boolean; onSubmit: () => void; onChange: (val: string) => void;
-  onToggleCollapse: () => void; onHistoryUp?: (() => void) | undefined; onHistoryDown?: (() => void) | undefined;
-}
-
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
-
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 const useSpinner = (active: boolean): string => {
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     if (!active) return undefined;
-    const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER.length), 80);
     return (): void => clearInterval(timer);
   }, [active]);
-  return SPINNER_FRAMES[frame] ?? '⠋';
+  return SPINNER[frame] ?? '⠋';
 };
 
-const Header = ({ collapsed }: { collapsed: boolean }): React.JSX.Element => (
-  <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
-    <Text bold color="cyan">🤖 Crypto Agent — Autonomous ReAct Trading Terminal</Text>
-    <Box gap={2}>
-      <Text color="gray">Model: <Text color="yellow">{defaultModel}</Text></Text>
-      <Text color="gray">Env: <Text color="green">paper-broker</Text></Text>
-      <Text color="gray">Thoughts: <Text color="magenta">{collapsed ? '▸ Collapsed' : '▾ Expanded'} [Ctrl+T]</Text></Text>
-      <Text color="gray">Rate Limit: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
-    </Box>
-  </Box>
-);
+const circuitColor = (c: CircuitState): string =>
+  c === 'NORMAL' ? 'green' : c === 'CAUTION' ? 'yellow' : c === 'REDUCED' ? 'magenta' : 'red';
 
-const StepList = ({ steps, keyPrefix, collapsed }: { steps: AgentStep[]; keyPrefix: string; collapsed?: boolean }): React.JSX.Element => (
+const Header = ({ collapsed, port }: { collapsed: boolean; port: PortfolioState }): React.JSX.Element => {
+  const kernel = getKernel();
+  const c = deriveCircuitState(port.dailyLossPercent, port.drawdownPercent, port.lossStreak, kernel.limits);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
+      <Text bold color="cyan">🤖 Crypto Agent — Autonomous Trading Terminal</Text>
+      <Box gap={2}>
+        <Text color="gray">Venue: <Text bold color={kernel.venue === 'paper' ? 'green' : 'yellow'}>{kernel.venue.toUpperCase()}</Text></Text>
+        <Text color="gray">Equity: <Text bold color="white">${port.equity.toFixed(2)}</Text></Text>
+        <Text color="gray">Avail: <Text color="white">${port.availableMargin.toFixed(2)}</Text></Text>
+        <Text color="gray">Daily: <Text color={port.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{port.dailyRealizedPnl >= 0 ? '+' : ''}${port.dailyRealizedPnl.toFixed(2)}</Text></Text>
+        <Text color="gray">Circuit: <Text bold color={circuitColor(c)}>{c} {c === 'NORMAL' ? '🟢' : '⚠️'}</Text></Text>
+      </Box>
+      <Box gap={2}>
+        <Text color="gray">Model: <Text color="yellow">{defaultModel}</Text></Text>
+        <Text color="gray">Thoughts: <Text color="magenta">{collapsed ? '▸ Collapsed' : '▾ Expanded'} [Ctrl+T]</Text></Text>
+        <Text color="gray">Rate: <Text color="magenta">{binanceRateLimiter.getCurrentWeight()}/1200</Text></Text>
+        <Text color="gray">Cmds: <Text color="cyan">/scan · /portfolio · /clear</Text></Text>
+      </Box>
+    </Box>
+  );
+};
+
+const StepList = ({ steps, keyPrefix, collapsed }: { steps: readonly AgentStep[]; keyPrefix: string; collapsed?: boolean }): React.JSX.Element => (
   <Box flexDirection="column">
     {steps.map((s, idx) => s.type === 'tool' ? (
       <Text key={`${keyPrefix}-${idx}`} color="green">
@@ -127,12 +119,14 @@ const StepList = ({ steps, keyPrefix, collapsed }: { steps: AgentStep[]; keyPref
   </Box>
 );
 
-const MessageHistory = ({ messages, collapsed }: { messages: ChatMessage[]; collapsed: boolean }): React.JSX.Element => (
+const MessageHistory = ({ messages, collapsed }: { messages: readonly ChatMessage[]; collapsed: boolean }): React.JSX.Element => (
   <Box flexDirection="column">
     {messages.map((m) => (
       <Box key={m.id} flexDirection="column" marginBottom={1}>
         {m.role === 'user' ? (
           <Text bold color="blue">👤 You: {m.content}</Text>
+        ) : m.role === 'system' ? (
+          <Text color="yellow">{renderMarkdown(m.content)}</Text>
         ) : (
           <Box flexDirection="column">
             {m.steps && <StepList steps={m.steps} keyPrefix={`msg-${m.id}`} collapsed={collapsed} />}
@@ -147,7 +141,9 @@ const MessageHistory = ({ messages, collapsed }: { messages: ChatMessage[]; coll
   </Box>
 );
 
-const LiveTurn = ({ busy, status, steps, response, collapsed }: LiveTurnProps): React.JSX.Element => {
+const LiveTurn = ({ busy, status, steps, response, collapsed }: {
+  busy: boolean; status: string; steps: readonly AgentStep[]; response: string; collapsed: boolean;
+}): React.JSX.Element => {
   const spinner = useSpinner(busy);
   if (!busy) return <Box />;
   return (
@@ -164,48 +160,38 @@ const LiveTurn = ({ busy, status, steps, response, collapsed }: LiveTurnProps): 
   );
 };
 
-const PromptInput = ({
-  value, busy, onSubmit, onChange, onToggleCollapse, onHistoryUp, onHistoryDown,
-}: InputProps): React.JSX.Element => {
+const PromptInput = (props: {
+  value: string; busy: boolean; onSubmit: () => void; onChange: (val: string) => void;
+  onToggleCollapse: () => void; onHistoryUp?: () => void; onHistoryDown?: () => void;
+}): React.JSX.Element => {
   const { exit } = useApp();
   useInput((input, key) => {
     if (key.ctrl && (input === 'c' || input === '\u0003')) exit();
-    else if (key.ctrl && (input === 't' || input === '\u0014')) onToggleCollapse();
-    else if (busy) return;
-    else if (key.upArrow) onHistoryUp?.();
-    else if (key.downArrow) onHistoryDown?.();
-    else if (key.return) onSubmit();
-    else if (key.backspace || key.delete) onChange(value.slice(0, -1));
-    else if (!key.ctrl && !key.meta && input) onChange(value + input);
+    else if (key.ctrl && (input === 't' || input === '\u0014')) props.onToggleCollapse();
+    else if (props.busy) return;
+    else if (key.upArrow) props.onHistoryUp?.();
+    else if (key.downArrow) props.onHistoryDown?.();
+    else if (key.return) props.onSubmit();
+    else if (key.backspace || key.delete) props.onChange(props.value.slice(0, -1));
+    else if (!key.ctrl && !key.meta && input) props.onChange(props.value + input);
   });
   return (
-    <Box borderStyle="single" borderColor={busy ? 'gray' : 'green'} paddingX={1}>
-      <Text bold color={busy ? 'gray' : 'green'}>&gt; </Text>
-      <Text>{value}</Text>
-      {!busy && <Text color="green">█</Text>}
+    <Box borderStyle="single" borderColor={props.busy ? 'gray' : 'green'} paddingX={1}>
+      <Text bold color={props.busy ? 'gray' : 'green'}>&gt; </Text>
+      <Text>{props.value}</Text>
+      {!props.busy && <Text color="green">█</Text>}
     </Box>
   );
 };
 
-const recordThought = (collector: TurnCollector, chunk: string): void => {
-  const last = collector.steps[collector.steps.length - 1];
-  if (last?.type === 'thought') last.content += chunk;
-  else collector.steps.push({ type: 'thought', content: chunk });
-};
-
-const recordToolResult = (
-  collector: TurnCollector, res: { toolCallId?: string; toolName: string; outputString: string }
-): void => {
-  const formatted = formatToolResult(res.outputString);
-  const target = collector.steps.slice().reverse().find(
-    (s) => s.type === 'tool' && (res.toolCallId ? s.tool.id === res.toolCallId : s.tool.name === res.toolName && !s.tool.result)
-  );
-  if (target?.type === 'tool') target.tool.result = formatted;
-};
-
-const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
+const createLiveHooks = (handlers: {
+  collector: TurnCollector; setStatus: (s: string) => void;
+  setSteps: React.Dispatch<React.SetStateAction<AgentStep[]>>; setResponse: React.Dispatch<React.SetStateAction<string>>;
+}): AgentHooks => ({
   onThinking: (chunk: string): void => {
-    recordThought(handlers.collector, chunk);
+    const last = handlers.collector.steps[handlers.collector.steps.length - 1];
+    if (last?.type === 'thought') last.content += chunk;
+    else handlers.collector.steps.push({ type: 'thought', content: chunk });
     handlers.setStatus('Reasoning...');
     handlers.setSteps([...handlers.collector.steps]);
   },
@@ -215,7 +201,10 @@ const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
     handlers.setSteps([...handlers.collector.steps]);
   },
   onToolCallEnd: (res): void => {
-    recordToolResult(handlers.collector, res);
+    const s = handlers.collector.steps.slice().reverse().find(
+      (x) => x.type === 'tool' && (res.toolCallId ? x.tool.id === res.toolCallId : x.tool.name === res.toolName && !x.tool.result)
+    );
+    if (s?.type === 'tool') s.tool.result = formatToolResult(res.outputString);
     handlers.setSteps([...handlers.collector.steps]);
   },
   onToken: (token: string): void => {
@@ -223,6 +212,8 @@ const createLiveHooks = (handlers: ChatHandlers): AgentHooks => ({
     handlers.setResponse((prev) => prev + token);
   },
 });
+
+const MAX_CHAT_MESSAGES = 15;
 
 const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -234,15 +225,54 @@ const useAgentChat = (orchestrator: WatchOrchestrator): AgentChatState => {
   const sendMessage = useCallback(async (text: string): Promise<void> => {
     const collector: TurnCollector = { steps: [] };
     setIsBusy(true); setStatus('Thinking with ReAct...'); setSteps([]); setResponse('');
-    setMessages((prev) => [...prev, { id: String(Date.now()), role: 'user', content: text }]);
+    setMessages((prev) => [...prev, { id: String(Date.now()), role: 'user' as const, content: text }].slice(-MAX_CHAT_MESSAGES));
     const hooks = createLiveHooks({ collector, setStatus, setSteps, setResponse });
     const answer = await runTradingAgent(text, { hooks, orchestrator });
-    setMessages((prev) => [...prev, { id: String(Date.now()), role: 'agent', content: answer, steps: [...collector.steps] }]);
+    setMessages((prev) => [...prev, { id: String(Date.now()), role: 'agent' as const, content: answer, steps: [...collector.steps] }].slice(-MAX_CHAT_MESSAGES));
     setSteps([]); setResponse(''); setIsBusy(false); setStatus('Idle');
   }, [orchestrator]);
 
-  return { messages, isBusy, status, steps, response, sendMessage };
+  const clearMessages = useCallback((): void => setMessages([]), []);
+  const addSystemNote = useCallback((msg: string): void => {
+    setMessages((prev) => [...prev, { id: String(Date.now()), role: 'system' as const, content: msg }].slice(-MAX_CHAT_MESSAGES));
+  }, []);
+
+  return { messages, isBusy, status, steps, response, sendMessage, clearMessages, addSystemNote };
 };
+
+const usePortfolio = (orchestrator: WatchOrchestrator): PortfolioState => {
+  const [port, setPort] = useState<PortfolioState>(() => getKernel().portfolio.peek());
+  useEffect(() => {
+    orchestrator.start();
+    const poll = setInterval(async () => {
+      try { setPort(await getKernel().portfolio.refresh()); } catch { /* ignore */ }
+    }, 1000);
+    return (): void => { clearInterval(poll); orchestrator.stop(); };
+  }, [orchestrator]);
+  return port;
+};
+
+interface SubmitContext {
+  readonly inputVal: string; readonly setInputVal: (v: string) => void;
+  readonly chat: AgentChatState; readonly history: PromptHistory; readonly exit: () => void;
+}
+
+const useSubmitHandler = (ctx: SubmitContext): () => void =>
+  useCallback((): void => {
+    const t = ctx.inputVal.trim();
+    if (!t) return;
+    if (t.toLowerCase() === 'exit' || t.toLowerCase() === 'quit') { ctx.exit(); return; }
+    ctx.history.save(t);
+    ctx.setInputVal('');
+    if (t === '/clear') { ctx.chat.clearMessages(); return; }
+    if (t === '/help') {
+      ctx.chat.addSystemNote('💡 **Commands:** `/scan` · `/portfolio` · `/clear` · `[Ctrl+T]` thoughts · `exit`');
+      return;
+    }
+    const prompt = t === '/scan' ? buildScanPrompt() : t === '/portfolio'
+      ? 'Inspect portfolio state: show equity, margin, positions, and circuit risk status.' : t;
+    void ctx.chat.sendMessage(prompt);
+  }, [ctx]);
 
 export const App = (): React.JSX.Element => {
   const { exit } = useApp();
@@ -251,25 +281,12 @@ export const App = (): React.JSX.Element => {
   const history = useMemo(() => new PromptHistory(), []);
   const { inputVal, setInputVal, handleUp, handleDown } = usePromptHistoryNavigation(history);
   const chat = useAgentChat(orchestrator);
-
-  useEffect(() => {
-    orchestrator.start();
-    return (): void => orchestrator.stop();
-  }, [orchestrator]);
-
-  const handleSubmit = useCallback((): void => {
-    const trimmed = inputVal.trim();
-    if (!trimmed) return;
-    if (trimmed.toLowerCase() === 'exit' || trimmed.toLowerCase() === 'quit') { exit(); return; }
-    history.save(trimmed);
-    setInputVal('');
-    const prompt = trimmed === '/scan' || trimmed.toLowerCase() === 'scan' ? buildScanPrompt() : trimmed;
-    void chat.sendMessage(prompt);
-  }, [inputVal, chat, exit, history, setInputVal]);
+  const port = usePortfolio(orchestrator);
+  const handleSubmit = useSubmitHandler({ inputVal, setInputVal, chat, history, exit });
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Header collapsed={collapsed} />
+      <Header collapsed={collapsed} port={port} />
       <MessageHistory messages={chat.messages} collapsed={collapsed} />
       <LiveTurn busy={chat.isBusy} status={chat.status} steps={chat.steps} response={chat.response} collapsed={collapsed} />
       <WatcherPanel orchestrator={orchestrator} />
