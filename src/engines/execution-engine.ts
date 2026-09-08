@@ -18,6 +18,13 @@ export interface TrackedOrder {
   filledQuantity: number;
   avgFillPrice?: number;
   updatedAt: number;
+  /** When the intent was registered (latency + audit anchor). */
+  registeredAt: number;
+  /** Execution-quality contract: the price the decision was priced against. */
+  expectedPrice?: number;
+  /** Entry/exit lineage for fills attribution. */
+  intentType: 'ENTRY' | 'EXIT' | 'REDUCE';
+  strategyId?: string;
 }
 
 const SUBMIT_TIMEOUT_MS = 10_000;
@@ -40,19 +47,20 @@ interface HydratedOrder {
   readonly quantity: number;
   readonly status: OrderStatus;
   readonly orderId?: string;
+  readonly registeredAt: number;
 }
 
 /** Scan the event log into per-decision register + last-transition views. */
 const scanOrderEvents = (
   source: readonly { at: number; type: string; decisionId?: string; symbol?: string; payload: unknown }[]
 ): Map<string, HydratedOrder> => {
-  const registered = new Map<string, { symbol: string; payload: Record<string, unknown> }>();
+  const registered = new Map<string, { symbol: string; at: number; payload: Record<string, unknown> }>();
   const transitions = new Map<string, { to: OrderStatus; orderId: string | null }[]>();
   for (const e of source) {
     const id = e.decisionId;
     if (!id) continue;
     if (e.type === 'order.registered') {
-      registered.set(id, { symbol: e.symbol ?? '', payload: e.payload as Record<string, unknown> });
+      registered.set(id, { symbol: e.symbol ?? '', at: e.at, payload: e.payload as Record<string, unknown> });
     } else if (e.type === 'order.transition') {
       const p = e.payload as { to?: OrderStatus; orderId?: string | null };
       if (p?.to) {
@@ -77,7 +85,7 @@ const scanOrderEvents = (
 // remains the safety net for any borderline case).
 const hydratableOrder = (
   id: string,
-  reg: { symbol: string; payload: Record<string, unknown> },
+  reg: { symbol: string; at: number; payload: Record<string, unknown> },
   status: OrderStatus,
   last: { to: OrderStatus; orderId: string | null } | undefined
 ): HydratedOrder => ({
@@ -86,6 +94,7 @@ const hydratableOrder = (
   pair: String(reg.payload?.pair ?? ''),
   side: reg.payload?.side === 'sell' ? 'sell' : 'buy',
   quantity: Number(reg.payload?.quantity ?? 0),
+  registeredAt: reg.at,
   status,
   orderId: last?.orderId ?? undefined,
 });
@@ -97,6 +106,8 @@ export class ExecutionEngine {
   private readonly orders = new Map<string, TrackedOrder>();
   /** Optional global gate (kill switch). Returns block reason or null. */
   private submissionGate: (() => string | null) | undefined;
+  /** Optional fills observer (FillsLedger). Fires on every fill delta. */
+  private onFill: ((tracked: TrackedOrder, at: number) => void) | undefined;
 
   constructor(broker: IExecutionBroker, store: EventStore, log?: Logger) {
     this.broker = broker;
@@ -111,6 +122,11 @@ export class ExecutionEngine {
    */
   setSubmissionGate(gate: () => string | null): void {
     this.submissionGate = gate;
+  }
+
+  /** Install the fills observer (execution-quality + live PnL attribution). */
+  setFillHook(hook: (tracked: TrackedOrder, at: number) => void): void {
+    this.onFill = hook;
   }
 
   get(intentId: string): TrackedOrder | undefined {
@@ -137,6 +153,7 @@ export class ExecutionEngine {
       intentId: spec.intentId, pair: spec.pair, symbol: spec.symbol,
       side: spec.side, quantity: spec.quantity, reduceOnly: false,
       status: 'RISK_APPROVED', filledQuantity: 0, updatedAt: Date.now(),
+      registeredAt: Date.now(), intentType: 'ENTRY',
     };
     this.orders.set(spec.intentId, tracked);
     this.store.appendClassified({
@@ -177,6 +194,9 @@ export class ExecutionEngine {
     const tracked = this.orders.get(intentId);
     if (!tracked) throw new Error(`unknown intent ${intentId}`);
     this.assertSubmittable(tracked);
+    tracked.expectedPrice = req.expectedPrice;
+    tracked.intentType = req.intentType ?? 'ENTRY';
+    tracked.strategyId = req.strategyId;
     this.transition(tracked, 'SUBMITTING');
     try {
       const placed = await withTimeout(
@@ -198,11 +218,17 @@ export class ExecutionEngine {
 
   /** Fold a broker-side order view into the tracked FSM state. */
   applyBrokerUpdate(tracked: TrackedOrder, update: BrokerOrder): void {
+    const prevFilled = tracked.filledQuantity;
     tracked.orderId = update.orderId;
     tracked.filledQuantity = update.filledQuantity;
     if (update.avgFillPrice !== undefined) tracked.avgFillPrice = update.avgFillPrice;
     this.transition(tracked, update.status);
     tracked.updatedAt = Date.now();
+    // Fire the fills observer for every NEW fill quantity (submit path and
+    // reconciler fold both go through here, so nothing can bypass it).
+    if (tracked.filledQuantity > prevFilled && tracked.avgFillPrice !== undefined) {
+      this.onFill?.(tracked, tracked.updatedAt);
+    }
   }
 
   /** Cancel an eligible order. */
@@ -251,6 +277,8 @@ export class ExecutionEngine {
         orderId: h.orderId,
         filledQuantity: 0,
         updatedAt: Date.now(),
+        registeredAt: h.registeredAt,
+        intentType: 'ENTRY',
       });
     }
   }

@@ -200,7 +200,7 @@ routes (`/health`, `/metrics`) remain public for load balancers.
 | `/api/kernel/events` | `GET` | `READ_AUDIT` | Recent audit events (`?limit=50`) |
 | `/api/kernel/pipeline/:symbol` | `POST` | `RUN_PIPELINE` | Trigger the deterministic pipeline for a symbol |
 | `/api/kernel/killswitch` | `GET` | `READ_AUDIT` | Kill-switch state, reason, actor |
-| `/api/kernel/analytics` | `GET` | `READ_PORTFOLIO` | Performance summary (Sharpe/Sortino), per-strategy/symbol/regime segments, strategy registry status |
+| `/api/kernel/analytics` | `GET` | `READ_PORTFOLIO` | Performance summary (Sharpe/Sortino), per-strategy/symbol/regime segments, strategy registry, execution quality (slippage/latency/fills) |
 | `/api/kernel/streams` | `GET` | `READ_MARKET` | WS stream health: market/account state, staleness (ms) |
 | `/api/kernel/killswitch/halt` | `POST` | `CONTROL_TRADE` | Halt all trading (`{ "reason": "..." }`) |
 | `/api/kernel/killswitch/resume` | `POST` | `ADMIN` | Resume trading (reason mandatory, audited) |

@@ -15,6 +15,7 @@ import { PerformanceEngine } from './engines/performance-engine.js';
 import { ExecutionEngine } from './engines/execution-engine.js';
 import { Reconciler } from './engines/reconciler.js';
 import { RiskReservationManager } from './engines/risk-reservations.js';
+import { FillsLedger } from './engines/fills-ledger.js';
 import { SymbolLanes } from './engines/event-bus.js';
 import { KillSwitch } from './security/kill-switch.js';
 import { TradeLedger } from './learning/trade-ledger.js';
@@ -69,6 +70,8 @@ export interface TradingKernel {
   readonly marketStore: MarketStateStore;
   readonly accountCache: PortfolioStateStore;
   readonly streams: KernelStreams;
+  /** Live fills ledger: execution quality + live PnL attribution. */
+  readonly fills: FillsLedger;
   /** Boot the WS streams (idempotent); REST-only when disabled. */
   startStreams(): Promise<void>;
   stopStreams(): void;
@@ -117,6 +120,7 @@ interface KernelParts {
   readonly killSwitch: KillSwitch;
   readonly ledger: TradeLedger;
   readonly marketStore: MarketStateStore;
+  readonly fills: FillsLedger;
   readonly streams: KernelStreams;
   readonly crossVenueGate?: (symbol: string) => Promise<{
     readonly tradable: boolean;
@@ -172,6 +176,7 @@ interface KernelContext {
   readonly coindcxClient?: CoinDCXClient;
   readonly marketStore: MarketStateStore;
   readonly accountCache: PortfolioStateStore;
+  readonly fills: FillsLedger;
   readonly crossVenueGate?: (symbol: string) => Promise<{
     readonly tradable: boolean;
     readonly reasons: readonly string[];
@@ -194,11 +199,25 @@ const buildKernelContext = (
   const strategies = new StrategyRegistry(store);
   strategies.hydrate();
   const { client, broker, router, registry, crossVenueGate } = buildBroker(venue, log, performance, ledger);
+  // Live fills ledger. On the LIVE venue, fills-realized closes feed the
+  // performance engine and the learning ledger (paper feeds them through
+  // its own onClose hook — wiring both would double-count).
+  const fills = new FillsLedger(
+    store, venue,
+    venue === 'coindcx'
+      ? (decisionId, pnl, at): void => {
+          performance.recordTradeClosed(pnl, at);
+          ledger.recordClosed(decisionId, pnl, at);
+        }
+      : undefined
+  );
+  fills.hydrate();
   return {
     venue, store, broker, router, registry, performance, ledger, strategies, crossVenueGate,
     coindcxClient: client,
     marketStore: new MarketStateStore(),
     accountCache: new PortfolioStateStore(),
+    fills,
   };
 };
 
@@ -207,6 +226,11 @@ const installSafetyGates = (parts: KernelParts): void => {
   // Restart truth: rebuild tracked orders (incl. UNKNOWN) from the event
   // log so the reconciler converges instead of forgetting live orders.
   parts.execution.hydrate();
+  // Execution quality + live PnL attribution: every fill delta flows
+  // through the ledger (submit path AND reconciler fold).
+  parts.execution.setFillHook((tracked, at): void => {
+    parts.fills.record(tracked, at);
+  });
   // Unknown/unreadable state stays HALTED (fail-safe default).
   parts.killSwitch.hydrate();
   // The execution engine independently refuses new submissions while
@@ -263,6 +287,7 @@ const buildParts = (ctx: KernelContext, log: Logger): KernelParts => {
     reservations: new RiskReservationManager(ctx.store),
     specFor: buildSpecFor(ctx),
     marketStore: ctx.marketStore,
+    fills: ctx.fills,
     streams: buildStreams({
       audit: ctx.store, provider, log, venue: ctx.venue,
       coindcxClient: ctx.coindcxClient, resyncAccount,
@@ -294,6 +319,7 @@ export const createKernel = (venueOverride?: ExecutionVenue): TradingKernel => {
     execution: parts.execution, reconciler, killSwitch: parts.killSwitch,
     ledger: ctx.ledger, strategies: ctx.strategies,
     marketStore: parts.marketStore, accountCache: ctx.accountCache,
+    fills: parts.fills,
     streams: parts.streams,
     startStreams: (): Promise<void> => startStreams(parts.streams, log),
     stopStreams: (): void => stopStreams(parts.streams),

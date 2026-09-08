@@ -28,6 +28,13 @@ and validator; no code path from LLM output to order without RiskEngine approval
 - [x] SymbolRouter: USDT-margined preferred, INR fallback + live USDTINR FX
 - [x] Reconciler (query-by-client_order_id → fold broker truth → repair)
 - [x] Paper venue with fees/slippage/TP-SL/liquidation-margin simulation
+- [x] Live fills ledger: every fill delta (submit path AND reconciler fold)
+      persists a `fill.recorded` event (delta + cumulative quantity = replay-safe);
+      execution-quality metrics (signed slippage bps vs the decision's expected
+      price, fill latency) served via `/api/kernel/analytics`; on the LIVE venue,
+      EXIT/REDUCE fills realize position PnL against the average entry and
+      attribute the close to the ENTRY decision's feature snapshot (paper venue
+      keeps its own onClose ledger - no double counting)
 - [x] Event-driven runtime (this branch): Binance futures multiplexed WS
       (`kline_5m/15m/1h/4h + markPrice@1s + miniTicker`) → `MarketStateStore`,
       CoinDCX private WS (`df-order-update`, `df-position-update`, `balance-update`)

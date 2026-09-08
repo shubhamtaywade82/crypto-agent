@@ -88,6 +88,7 @@ app.get('/api/kernel/analytics', guard('READ_PORTFOLIO'), (c) => {
     ...snapshot,
     openTrades: kernel.ledger.openTrades.length,
     strategies,
+    execution: kernel.fills.quality(),
   });
 });
 
