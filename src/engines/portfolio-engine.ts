@@ -7,6 +7,7 @@ import {
 } from '../domain/portfolio/valuation.js';
 import type { RiskLimits } from '../domain/risk/risk-config.js';
 import type { PerformanceEngine } from './performance-engine.js';
+import type { PortfolioStateStore } from './portfolio-state-store.js';
 
 /** Pluggable performance metrics source (PerformanceEngine-backed). */
 export interface PortfolioMetricsSource {
@@ -48,6 +49,12 @@ export interface PortfolioEngineOptions {
   readonly usdtInrRate?: () => Promise<number>;
   /** Real performance ledger (daily PnL, loss streak, drawdown). */
   readonly performance?: PerformanceEngine;
+  /**
+   * Event-driven cache (private WS). When fresh, refresh() serves from it
+   * without venue REST calls; REST remains the seeding/recovery path.
+   */
+  readonly cache?: PortfolioStateStore;
+  readonly cacheMaxAgeMs?: number;
 }
 
 /**
@@ -70,6 +77,8 @@ export class PortfolioEngine {
   private readonly fx?: FxRateCache;
   private readonly usdtInrRate?: () => Promise<number>;
   private readonly performance?: PerformanceEngine;
+  private readonly cache?: PortfolioStateStore;
+  private readonly cacheMaxAgeMs: number;
   private lastState?: PortfolioState;
   private lastValuation?: ValuationResult;
 
@@ -83,14 +92,47 @@ export class PortfolioEngine {
     this.fx = opts.usdtInrRate
       ? new FxRateCache({ freshMs: 30_000, staleMs: 300_000 }) // accounting tolerates stale rates
       : undefined;
+    this.cache = opts.cache;
+    this.cacheMaxAgeMs = opts.cacheMaxAgeMs ?? 10_000;
   }
 
+  /**
+   * Event-driven fast path: when the private-WS cache is fresh the state
+   * is assembled without venue REST calls. Otherwise REST runs and re-seeds
+   * the cache, so the two paths converge on the same store.
+   */
   async refresh(): Promise<PortfolioState> {
+    if (this.cache?.isFresh(this.cacheMaxAgeMs)) {
+      return this.finalize(this.cachedPositions(), this.cachedBalances());
+    }
     const [positions, balances] = await Promise.all([
       this.broker.getPositions(),
       this.broker.getBalances(),
     ]);
+    this.cache?.syncSnapshot(positions, balances, Date.now());
+    return this.finalize(positions, balances);
+  }
 
+  private cachedPositions(): readonly BrokerPosition[] {
+    return (this.cache?.positionsNow() ?? []).map((p) => ({
+      positionId: `ws:${p.pair}:${p.side}`,
+      pair: p.pair,
+      side: p.side,
+      size: p.size,
+      entryPrice: p.entryPrice,
+      markPrice: p.markPrice,
+      unrealizedPnl: p.unrealizedPnl,
+    }));
+  }
+
+  private cachedBalances(): readonly { currency: string; total: number }[] {
+    return (this.cache?.balancesNow() ?? []).map((b) => ({ currency: b.currency, total: b.total }));
+  }
+
+  private async finalize(
+    positions: readonly BrokerPosition[],
+    balances: readonly { currency: string; total: number }[]
+  ): Promise<PortfolioState> {
     const valuation = await this.valuate(balances);
     this.lastValuation = valuation;
     const walletEquity = valuation.equity > 0 ? valuation.equity : this.fallbackEquity;

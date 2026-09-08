@@ -91,6 +91,16 @@ app.get('/api/kernel/analytics', guard('READ_PORTFOLIO'), (c) => {
   });
 });
 
+app.get('/api/kernel/streams', guard('READ_MARKET'), (c) => {
+  const kernel = getKernel();
+  return c.json({
+    market: kernel.streams.market?.status() ?? null,
+    account: kernel.streams.account?.status() ?? null,
+    marketStalenessMs: kernel.marketStore.stalenessMs('BTCUSDT') ?? null,
+    accountStalenessMs: kernel.accountCache.stalenessMs() ?? null,
+  });
+});
+
 app.post('/api/kernel/killswitch/halt', guard('CONTROL_TRADE'), async (c) => {
   const kernel = getKernel();
   const body = (await c.req.json().catch(() => ({}))) as { reason?: string };

@@ -126,6 +126,13 @@ Docs: `AGENTS.md` (developer & AI agent guide) · `docs/DEPLOYMENT.md` (server &
 - **Cross-venue execution gate:** CoinDCX order book vs Binance reference (basis/spread
   in bps, staleness health) is checked before risking capital; venue disagreement
   beyond tolerance rejects the trade.
+- **Event-driven market & account runtime:** Binance futures multiplexed WebSocket
+  (4-timeframe klines + mark price @1s + mini tickers) feeds a deterministic
+  `MarketStateStore`; CoinDCX private WS streams (orders, positions, balances) feed a
+  `PortfolioStateStore`; the pipeline builds its MTF ladder from the stream when fresh
+  with **zero REST calls** and transparently falls back to REST (audited provenance
+  `stream|rest`); exponential-backoff reconnects and post-reconnect REST re-seeding keep
+  the caches truthful.
 - **Dockerized GPU Pipeline:** Multi-stage Alpine container, automatic model catalogue
   verification and pull, NVIDIA GPU passthrough, and persistent model caching.
 
@@ -194,6 +201,7 @@ routes (`/health`, `/metrics`) remain public for load balancers.
 | `/api/kernel/pipeline/:symbol` | `POST` | `RUN_PIPELINE` | Trigger the deterministic pipeline for a symbol |
 | `/api/kernel/killswitch` | `GET` | `READ_AUDIT` | Kill-switch state, reason, actor |
 | `/api/kernel/analytics` | `GET` | `READ_PORTFOLIO` | Performance summary (Sharpe/Sortino), per-strategy/symbol/regime segments, strategy registry status |
+| `/api/kernel/streams` | `GET` | `READ_MARKET` | WS stream health: market/account state, staleness (ms) |
 | `/api/kernel/killswitch/halt` | `POST` | `CONTROL_TRADE` | Halt all trading (`{ "reason": "..." }`) |
 | `/api/kernel/killswitch/resume` | `POST` | `ADMIN` | Resume trading (reason mandatory, audited) |
 | `/metrics` | `GET` | — (public) | Uptime and heap memory statistics |

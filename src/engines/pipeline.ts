@@ -10,7 +10,7 @@ import { rejected } from '../domain/risk/risk-decision.js';
 import type { SizingResult } from './position-sizer.js';
 import { sizePosition, failedSizing } from './position-sizer.js';
 import { evaluateRisk } from './risk-engine.js';
-import { buildMarketState } from './market-state-engine.js';
+import { buildMarketState, buildMtfFromStore } from './market-state-engine.js';
 import { detectSetups, type SetupCandidate } from './setup-engine.js';
 import { stageExecution } from './pipeline-stage.js';
 export { stageExecution };
@@ -23,6 +23,7 @@ import type { ExecutionEngine, TrackedOrder } from './execution-engine.js';
 import type { PortfolioEngine } from './portfolio-engine.js';
 import type { RiskReservationManager } from './risk-reservations.js';
 import type { TradeLedger } from '../learning/trade-ledger.js';
+import type { MarketStateStore } from './market-state-store.js';
 import type { ContractSpec } from '../domain/futures/contract-spec.js';
 import { makeId } from '../domain/primitives.js';
 
@@ -58,6 +59,14 @@ export interface PipelineDeps {
   readonly isTradingAllowed?: () => { readonly allowed: boolean; readonly reason?: string };
   /** Learning ledger: feature snapshots in, outcomes attributed back. */
   readonly ledger?: TradeLedger;
+  /**
+   * Event-driven market cache (Binance WS). When fresh, the pipeline
+   * builds its MTF ladder from the store with ZERO REST calls; REST
+   * remains the cold-start/recovery path.
+   */
+  readonly marketStore?: MarketStateStore;
+  /** Max age of a store event before the pipeline falls back to REST. */
+  readonly marketMaxStaleMs?: number;
   /**
    * Cross-venue execution gate (optional). When present, consulted right
    * before risking capital: basis/spread/health beyond tolerance rejects
@@ -132,22 +141,51 @@ const refreshPortfolio = async (
   }
 };
 
+interface MarketContext {
+  readonly mtf: MtfResult;
+  readonly setups: ReturnType<typeof detectSetups>;
+}
+
+const emitSnapshot = (
+  deps: PipelineDeps, ctx: MarketContext, symbol: string, provenance: 'stream' | 'rest'
+): void => {
+  deps.store.append({
+    type: 'pipeline.snapshot', symbol,
+    payload: {
+      regime: ctx.mtf.state.regime, setups: ctx.setups.length,
+      btc: ctx.mtf.state.btcRegime, provenance,
+    },
+  });
+};
+
+/** Event-driven path: fresh WS store -> MTF + setups with zero REST. */
+const streamContext = (deps: PipelineDeps, symbol: string): MarketContext | undefined => {
+  const maxStaleMs = deps.marketMaxStaleMs ?? 45_000;
+  if (!deps.marketStore?.isFresh(symbol, maxStaleMs)) return undefined;
+  const mtf = buildMtfFromStore(deps.marketStore, symbol);
+  if (!mtf) return undefined;
+  const setups = detectSetups(mtf, deps.limits);
+  deps.ledger?.recordMark(symbol, mtf.state.price.mark);
+  const ctx: MarketContext = { mtf, setups };
+  emitSnapshot(deps, ctx, symbol, 'stream');
+  return ctx;
+};
+
+/** REST recovery path (cold start, stream stale/down, partial ladders). */
+const restContext = async (deps: PipelineDeps, symbol: string): Promise<MarketContext> => {
+  const mtf: MtfResult = await buildMarketState(deps.provider, symbol);
+  // Feed the learning ledger's MAE/MFE trackers with the fresh mark.
+  deps.ledger?.recordMark(symbol, mtf.state.price.mark);
+  const ctx: MarketContext = { mtf, setups: detectSetups(mtf, deps.limits) };
+  emitSnapshot(deps, ctx, symbol, 'rest');
+  return ctx;
+};
+
 /** Market data + setup detection: the shared pre-strategy stage. */
 const gatherMarketContext = async (
   deps: PipelineDeps,
   symbol: string
-): Promise<{ mtf: MtfResult; setups: ReturnType<typeof detectSetups> }> => {
-  const mtf: MtfResult = await buildMarketState(deps.provider, symbol);
-  // Feed the learning ledger's MAE/MFE trackers with the fresh mark.
-  deps.ledger?.recordMark(symbol, mtf.state.price.mark);
-  const setups = detectSetups(mtf, deps.limits);
-  const state = mtf.state;
-  deps.store.append({
-    type: 'pipeline.snapshot', symbol,
-    payload: { regime: state.regime, setups: setups.length, btc: state.btcRegime },
-  });
-  return { mtf, setups };
-};
+): Promise<MarketContext> => streamContext(deps, symbol) ?? (await restContext(deps, symbol));
 
 export const runTradingPipeline = async (
   deps: PipelineDeps,

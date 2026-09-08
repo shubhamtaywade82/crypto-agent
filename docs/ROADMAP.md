@@ -28,7 +28,15 @@ and validator; no code path from LLM output to order without RiskEngine approval
 - [x] SymbolRouter: USDT-margined preferred, INR fallback + live USDTINR FX
 - [x] Reconciler (query-by-client_order_id → fold broker truth → repair)
 - [x] Paper venue with fees/slippage/TP-SL/liquidation-margin simulation
-- [ ] Private WS streams (order/position updates) to drive FSM push-based
+- [x] Event-driven runtime (this branch): Binance futures multiplexed WS
+      (`kline_5m/15m/1h/4h + markPrice@1s + miniTicker`) → `MarketStateStore`,
+      CoinDCX private WS (`df-order-update`, `df-position-update`, `balance-update`)
+      → `PortfolioStateStore`; REST demoted to cold-start backfill / reconnect
+      gap-recovery; pipeline serves MTF from the store when fresh (zero REST)
+      and falls back to REST otherwise; provenance (`stream|rest`) audited on
+      every `pipeline.snapshot`; exponential backoff + jitter reconnect with
+      `maxRetries` give-up (REST serves while DOWN); account cache re-seeds from
+      a full REST snapshot on EVERY reconnect before it is trusted again
 - [ ] CoinDCX sandbox contract tests + recorded fixtures
 - [ ] 72h paper soak with reconciliation report deltas = 0
 
