@@ -33,6 +33,8 @@ export interface CrossVenueState {
   readonly coindcxSpreadBps?: number;
   readonly binanceSpreadBps: number;
   readonly health: VenueHealth;
+  /** Where the Binance bid/ask came from: real book ticker or last proxy. */
+  readonly binanceQuoteSource?: 'book_ticker' | 'last_proxy';
   readonly at: number;
 }
 

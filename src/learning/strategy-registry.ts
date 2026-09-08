@@ -34,8 +34,8 @@ export interface StrategyDefinition {
   readonly registeredAt: number;
   promotedAt?: number;
   retiredAt?: number;
-  /** Cells (setup×regime) this strategy is approved to trade. */
-  readonly approvedCells: readonly string[];
+  /** Cells (setup×regime) this strategy is approved to trade. Mutable: promotions append. */
+  approvedCells: string[];
 }
 
 export interface PromotionVerdict {
@@ -90,6 +90,16 @@ interface RegistryEvent {
   readonly payload: unknown;
 }
 
+/** Merge promoted cells from a `strategy.promoted` payload (idempotent). */
+const mergeApprovedCells = (s: StrategyDefinition, payload: Record<string, unknown>): void => {
+  const cells = payload.approvedCells;
+  const fromList = Array.isArray(cells)
+    ? cells.filter((c): c is string => typeof c === 'string')
+    : [];
+  const fromCell = typeof payload.cell === 'string' ? [payload.cell] : [];
+  s.approvedCells = [...new Set([...s.approvedCells, ...fromList, ...fromCell])];
+};
+
 export class StrategyRegistry {
   private readonly strategies = new Map<string, StrategyDefinition>();
   private readonly store?: EventStore;
@@ -117,6 +127,8 @@ export class StrategyRegistry {
         if (s) {
           s.status = 'ACTIVE';
           s.promotedAt = e.at;
+          // Replay rebuilds exactly the cells the research gate promoted.
+          mergeApprovedCells(s, p);
         }
       } else if (e.type === 'strategy.retired' && typeof p?.strategyId === 'string') {
         const s = this.strategies.get(p.strategyId);
@@ -154,6 +166,11 @@ export class StrategyRegistry {
       });
     }
     return definition;
+  }
+
+  /** Idempotent registration: returns the existing definition if present. */
+  registerOnce(strategyId: string, gate: Partial<PromotionGate> = {}): StrategyDefinition {
+    return this.strategies.get(strategyId) ?? this.register(strategyId, gate);
   }
 
   get(strategyId: string): StrategyDefinition | undefined {
@@ -203,6 +220,28 @@ export class StrategyRegistry {
     return { promoted: reasons.length === 0, cell, reasons };
   }
 
+  /**
+   * Live-tradability check (V3.1 P0-5): a strategy may trade a cell only
+   * when it is ACTIVE and that exact (setup × regime) cell survived the
+   * frozen gate — cells are the smallest trusted execution units.
+   */
+  isCellTradable(strategyId: string, setupType: string, regime: string):
+    { readonly allowed: boolean; readonly reason?: string } {
+    const s = this.strategies.get(strategyId);
+    if (!s) return { allowed: false, reason: `strategy ${strategyId} not registered` };
+    if (s.status !== 'ACTIVE') {
+      return { allowed: false, reason: `strategy ${strategyId} is ${s.status}, not ACTIVE` };
+    }
+    const cell = `${setupType}|${regime}`;
+    if (!s.approvedCells.includes(cell)) {
+      return {
+        allowed: false,
+        reason: `cell ${cell} not approved (approved: ${s.approvedCells.join(', ') || 'none'})`,
+      };
+    }
+    return { allowed: true };
+  }
+
   /** Promote on a passing gate; persists the decision with reasons. */
   promote(
     strategyId: string,
@@ -216,11 +255,15 @@ export class StrategyRegistry {
     if (!s) return verdict;
     s.status = 'ACTIVE';
     s.promotedAt = Date.now();
+    s.approvedCells = [...new Set([...s.approvedCells, cell])];
     this.strategies.set(strategyId, s);
     if (this.store) {
       this.store.append({
         type: 'strategy.promoted',
-        payload: { strategyId, cell, stats: { n: stats.n, expectancyR: stats.expectancyR } },
+        payload: {
+          strategyId, cell, approvedCells: s.approvedCells,
+          stats: { n: stats.n, expectancyR: stats.expectancyR },
+        },
       });
     }
     return verdict;

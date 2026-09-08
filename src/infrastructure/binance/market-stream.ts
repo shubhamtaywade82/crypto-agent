@@ -188,6 +188,7 @@ export class BinanceMarketStream {
       ...TIMEFRAMES.map((tf) => streamName(s, tf)),
       `${s.toLowerCase()}@markPrice@1s`,
       `${s.toLowerCase()}@miniTicker`,
+      `${s.toLowerCase()}@bookTicker`,
     ]);
     return this.url + streams.join('/');
   }
@@ -222,11 +223,30 @@ export class BinanceMarketStream {
       return;
     }
     const name = parsed.stream ?? '';
+    // Book-ticker payloads are structurally parsed (the SDK validator
+    // covers kline/markPrice/miniTicker only).
+    if (name.includes('@bookTicker')) {
+      if (!this.applyBookTicker(parsed.data)) {
+        this.log.debug('unparsable bookTicker payload ignored', { stream: name });
+      }
+      return;
+    }
     try {
       this.apply(name, parseWsPayload(name, parsed.data));
     } catch {
       this.log.debug('unparsable stream payload ignored', { stream: name });
     }
+  }
+
+  /** Structural book-ticker parse: { s, b, a } with finite positive quotes. */
+  private applyBookTicker(data: unknown): boolean {
+    const d = data as { s?: unknown; b?: unknown; a?: unknown };
+    const bid = Number(d?.b);
+    const ask = Number(d?.a);
+    if (typeof d?.s !== 'string' || !Number.isFinite(bid) || !Number.isFinite(ask) ||
+      bid <= 0 || ask <= 0) return false;
+    this.store.setBookTicker({ symbol: d.s, bid, ask, at: this.now() });
+    return true;
   }
 
   private apply(name: string, payload: ReturnType<typeof parseWsPayload>): void {

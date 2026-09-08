@@ -73,32 +73,49 @@ describe('FillsLedger — recording + execution quality', () => {
   });
 });
 
-describe('FillsLedger — position accounting + live PnL attribution', () => {
-  it('EXIT fill realizes PnL against the average entry and attributes to the ENTRY decision', () => {
-    const closes: { decisionId: string; pnl: number }[] = [];
+describe('FillsLedger — position accounting + live PnL attribution (V3.1 FIFO lots)', () => {
+  it('EXIT closes lots FIFO and attributes one allocation per entry decision', () => {
+    const closes: { decisionId: string; pnl: number; positionId?: string }[] = [];
     const ledger = new FillsLedger(
       tempStore(), 'coindcx',
-      (decisionId, pnl): void => {
-        closes.push({ decisionId, pnl });
+      (a): void => {
+        closes.push({ decisionId: a.decisionId, pnl: a.pnl, positionId: a.positionId });
       }
     );
-    // Long 0.5 @ 100 then 0.5 @ 110 -> avg 105; exit all @ 120 -> pnl +15.
+    // Long 0.5 @ 100 then 0.5 @ 110 -> two lots; exit all @ 120.
     ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 0.5, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
     ledger.record(trackedOf({ intentId: 'e-2', filledQuantity: 0.5, avgFillPrice: 110, intentType: 'ENTRY' }), 1_200);
     ledger.record(
       trackedOf({ intentId: 'x-1', side: 'sell', filledQuantity: 1.0, avgFillPrice: 120, intentType: 'EXIT' }), 1_300
     );
-    expect(closes).toHaveLength(1);
-    expect(closes[0].decisionId).toBe('e-1'); // the ENTRY decision
-    expect(closes[0].pnl).toBeCloseTo(15, 6);
+    // FIFO: first lot 0.5*(120-100)=+10 credited to e-1, second 0.5*(120-110)=+5 to e-2.
+    expect(closes).toHaveLength(2);
+    expect(closes[0]).toMatchObject({ decisionId: 'e-1', pnl: 10 });
+    expect(closes[1]).toMatchObject({ decisionId: 'e-2', pnl: 5 });
+    expect(closes[0].positionId).toBe(closes[1].positionId); // same netting position
     expect(ledger.quality().realizedPnl).toBeCloseTo(15, 6);
-    expect(ledger.quality().realizedTrades).toBe(1);
+    expect(ledger.quality().realizedTrades).toBe(2);
+    expect(ledger.quality().positionsOpened).toBe(1);
+    expect(ledger.quality().positionsClosed).toBe(1);
+    expect(ledger.quality().openPositions).toBe(0);
+  });
+
+  it('scale-in entries append lots to the SAME position (positionId -> lots -> decisionId)', () => {
+    const ledger = new FillsLedger(tempStore(), 'coindcx');
+    ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 0.5, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
+    ledger.record(trackedOf({ intentId: 'e-2', filledQuantity: 1.0, avgFillPrice: 110, intentType: 'ENTRY' }), 1_200);
+    expect(ledger.quality().positionsOpened).toBe(1); // scale-in, not a new position
+    const [pos] = ledger.openPositions();
+    expect(pos.positionId).toBe('pos:BTCUSDT:buy:e-1');
+    expect(pos.lots).toHaveLength(2);
+    expect(pos.lots[0]).toMatchObject({ decisionId: 'e-1', price: 100 });
+    expect(pos.lots[1]).toMatchObject({ decisionId: 'e-2', price: 110 });
   });
 
   it('short positions: exit below entry realizes profit', () => {
     const closes: number[] = [];
-    const ledger = new FillsLedger(tempStore(), 'coindcx', (_id, pnl): void => {
-      closes.push(pnl);
+    const ledger = new FillsLedger(tempStore(), 'coindcx', (a): void => {
+      closes.push(a.pnl);
     });
     ledger.record(
       trackedOf({ intentId: 'e-1', side: 'sell', filledQuantity: 1, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100
@@ -111,8 +128,8 @@ describe('FillsLedger — position accounting + live PnL attribution', () => {
 
   it('reduce overfill clamps to the open quantity', () => {
     const closes: number[] = [];
-    const ledger = new FillsLedger(tempStore(), 'coindcx', (_id, pnl): void => {
-      closes.push(pnl);
+    const ledger = new FillsLedger(tempStore(), 'coindcx', (a): void => {
+      closes.push(a.pnl);
     });
     ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 0.5, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
     ledger.record(
@@ -122,10 +139,37 @@ describe('FillsLedger — position accounting + live PnL attribution', () => {
     expect(closes[0]).toBeCloseTo(5, 6); // 0.5 * (110 - 100)
   });
 
+  it('opposite ENTRY nets the position down first, remainder flips', () => {
+    const ledger = new FillsLedger(tempStore(), 'coindcx');
+    ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 1, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
+    // Opposite-side ENTRY of 1.2: closes the long (pnl -2 on 0.2 over), flips short.
+    ledger.record(
+      trackedOf({ intentId: 'e-2', side: 'sell', filledQuantity: 1.2, avgFillPrice: 98, intentType: 'ENTRY' }), 1_200
+    );
+    expect(ledger.quality().positionsClosed).toBe(1);
+    expect(ledger.quality().positionsOpened).toBe(2);
+    const [short] = ledger.openPositions();
+    expect(short.side).toBe('sell');
+    expect(short.lots[0].decisionId).toBe('e-2');
+    expect(short.lots[0].quantity).toBeCloseTo(0.2, 6);
+  });
+
+  it('persists position.opened / position.closed audit events', () => {
+    const store = tempStore();
+    const ledger = new FillsLedger(store, 'coindcx');
+    ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 1, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
+    ledger.record(
+      trackedOf({ intentId: 'x-1', side: 'sell', filledQuantity: 1, avgFillPrice: 105, intentType: 'EXIT' }), 1_200
+    );
+    const types = store.readAll(50).map((e) => e.type);
+    expect(types).toContain('position.opened');
+    expect(types).toContain('position.closed');
+  });
+
   it('PAPER venue does not invoke the close callback (paper broker owns it)', () => {
     const closes: number[] = [];
-    const ledger = new FillsLedger(tempStore(), 'paper', (_id, pnl): void => {
-      closes.push(pnl);
+    const ledger = new FillsLedger(tempStore(), 'paper', (a): void => {
+      closes.push(a.pnl);
     });
     ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 1, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
     ledger.record(
@@ -135,10 +179,10 @@ describe('FillsLedger — position accounting + live PnL attribution', () => {
     expect(closes).toHaveLength(0);
   });
 
-  it('EXIT without an open lot is recorded but not attributed', () => {
+  it('EXIT without an open position is recorded but not attributed', () => {
     const closes: number[] = [];
-    const ledger = new FillsLedger(tempStore(), 'coindcx', (_id, pnl): void => {
-      closes.push(pnl);
+    const ledger = new FillsLedger(tempStore(), 'coindcx', (a): void => {
+      closes.push(a.pnl);
     });
     ledger.record(
       trackedOf({ intentId: 'x-1', side: 'sell', filledQuantity: 1, avgFillPrice: 100, intentType: 'EXIT' }), 1_100
@@ -146,6 +190,31 @@ describe('FillsLedger — position accounting + live PnL attribution', () => {
     expect(ledger.quality().fills).toBe(1);
     expect(closes).toHaveLength(0);
     expect(ledger.quality().realizedTrades).toBe(0);
+  });
+
+  it('RESTART: hydrate replays fills WITHOUT re-firing the close fan-out (exactly-once)', () => {
+    const store = tempStore();
+    const closes: number[] = [];
+    const make = (): FillsLedger =>
+      new FillsLedger(store, 'coindcx', (a): void => {
+        closes.push(a.pnl);
+      });
+    const ledger = make();
+    ledger.record(trackedOf({ intentId: 'e-1', filledQuantity: 1, avgFillPrice: 100, intentType: 'ENTRY' }), 1_100);
+    ledger.record(
+      trackedOf({ intentId: 'x-1', side: 'sell', filledQuantity: 1, avgFillPrice: 110, intentType: 'EXIT' }), 1_200
+    );
+    expect(closes).toEqual([10]);
+    const liveEvents = store.readAll(Number.MAX_SAFE_INTEGER).length;
+    // Fresh instance over the same event store (restart scenario).
+    const reborn = make();
+    reborn.hydrate();
+    // The fan-out must NOT re-fire on replay (double counting corrupts risk).
+    expect(closes).toEqual([10]);
+    // Replaying persists nothing new (position events are replay-idempotent).
+    expect(store.readAll(Number.MAX_SAFE_INTEGER).length).toBe(liveEvents);
+    // State is fully rebuilt.
+    expect(reborn.quality()).toEqual(ledger.quality());
   });
 });
 

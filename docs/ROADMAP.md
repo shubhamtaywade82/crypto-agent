@@ -161,7 +161,9 @@ outputs through the pipeline and assert zero unapproved orders.
 - [x] Performance analytics: portfolio summary with Sharpe/Sortino over the daily R
       series, plus segmentation by strategy / symbol / regime and per-cell statistics —
       served at `GET /api/kernel/analytics` (READ_PORTFOLIO)
-- [ ] Rule candidates → backtest → walk-forward (train/validate/OOS) → paper → promote
+- [x] Walk-forward with TRUE futures replay + OOS promotion + approved-cell
+      enforcement (V3.1 — see below); `POST /api/kernel/walkforward/:symbol?apply`
+      promotes OOS-verified cells into the live registry
 - [ ] Wire journal lessons + strategy status into strategist context
 
 **Acceptance:** a rule affects live behavior only after surviving the gate that was
@@ -171,8 +173,8 @@ sample size, and last-promoted-at (all persisted events, replayable).
 ### Walk-forward harness ✅ (this branch)
 
 - [x] Deterministic replay: historical ladders bar-by-bar through the structure +
-      setup engines (zero LLM); one position at a time; time-stop + conservative
-      stop-first ambiguity resolution; cost-adjusted R outcomes with MAE/MFE
+      setup engines (zero LLM); position-concurrency slots; time-stop + conservative
+      stop-first ambiguity resolution; MAE/MFE in R
 - [x] Outcome dataset feeds the SAME `computeCellStatistics` used live; every
       (setup × regime) cell is evaluated against the SAME frozen `checkGate`
       thresholds as live promotion — evidence can only come from this pipeline
@@ -181,6 +183,43 @@ sample size, and last-promoted-at (all persisted events, replayable).
 
 **Acceptance:** identical input yields byte-identical datasets; a cell can never be
 promoted (live) without statistics that the harness could have produced.
+
+### V3.1 — execution fidelity + research validity ✅ (this branch)
+
+Review follow-up (8.8 → 9.3+ path): the remaining gap was concentrated in
+research validity and execution fidelity, not architecture.
+
+- [x] **Deterministic slippage enforcement (P0-1)** — every fill delta is checked
+      against `expectedPrice ± maxSlippageBps` using the MARGINAL fill price
+      (derived exactly from cumulative average folds); a breach persists a
+      CRITICAL `execution.slippage_breach` audit event and cancels the un-filled
+      remainder; a tolerance band without an anchor price is refused at submit
+- [x] **Position-ID attribution (P0-2)** — fills ledger rebuilt on the netting
+      model: `positionId → lots → fills → decisionId`; scale-ins append lots,
+      exits close FIFO with one allocation per lot, opposite-side entries net
+      down then flip; `position.opened` / `position.closed` audit events;
+      restart replay NEVER re-fires the close fan-out (exactly-once); the
+      TradeLedger's `trade.closed` is the single authoritative close event
+      (PerformanceEngine records live-only and folds it on replay)
+- [x] **True futures replay (P0-3)** — the simulator models contract constraints
+      (lot rounding, min quantity/notional, leverage cap), per-side taker fees,
+      per-side slippage on fill prices, signed funding over whole holding
+      periods, margin utilization caps and position concurrency; unsizable
+      geometry is skipped and counted (`skippedUnsizable`) exactly as the live
+      sizer would reject it
+- [x] **OOS promotion gate (P0-4)** — chronological IS/OOS split of the ladder;
+      a cell is promotable only when BOTH samples pass the SAME frozen gate
+      (aggregate-only promotion hides regime shifts); reasons are tagged
+      `IS:` / `OOS:`; applying a run persists registrations + promotions with
+      the approved-cell list
+- [x] **Approved-cell enforcement (P0-5)** — `ACTIVE strategy + approved cell =
+      tradable` enforced by a pipeline stage before sizing; unregistered
+      strategies are rejected once ANY strategy is registered (bootstrap policy:
+      an empty registry trades open, audited); `isCellTradable` survives restart
+- [x] **Cross-venue real top-of-book (P1)** — Binance `bookTicker` stream feeds
+      the market store; the gate uses REAL bid/ask when fresh (annotated
+      `book_ticker`), falling back to the last-price proxy only when absent or
+      stale (annotated `last_proxy`)
 
 ## Phase 6 — Production — security core ✅ (this branch)
 

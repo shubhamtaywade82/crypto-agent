@@ -16,6 +16,10 @@ export interface SymbolSnapshot {
   readonly fundingRate?: number;
   readonly openInterest?: number;
   readonly openInterestChange?: number;
+  /** Best bid/ask from the Binance book-ticker stream (real top-of-book). */
+  readonly bestBid?: number;
+  readonly bestAsk?: number;
+  readonly bestQuoteAt?: number;
   readonly updatedAt: number;
 }
 
@@ -29,6 +33,13 @@ export interface KlineUpdate {
 export interface TickerUpdate {
   readonly symbol: string;
   readonly price: number;
+  readonly at: number;
+}
+
+export interface BookTickerUpdate {
+  readonly symbol: string;
+  readonly bid: number;
+  readonly ask: number;
   readonly at: number;
 }
 
@@ -60,6 +71,9 @@ interface SymbolBook {
   fundingRate?: number;
   openInterest?: number;
   openInterestChange?: number;
+  bestBid?: number;
+  bestAsk?: number;
+  bestQuoteAt?: number;
   lastEventAt?: number;
 }
 
@@ -109,6 +123,16 @@ export class MarketStateStore {
     this.touch(b, u.at);
   }
 
+  /** Real top-of-book from the book-ticker stream (bid/ask, not last). */
+  setBookTicker(u: BookTickerUpdate): void {
+    if (!Number.isFinite(u.bid) || !Number.isFinite(u.ask) || u.bid <= 0 || u.ask <= 0) return;
+    const b = this.book(u.symbol);
+    b.bestBid = u.bid;
+    b.bestAsk = u.ask;
+    b.bestQuoteAt = u.at;
+    this.touch(b, u.at);
+  }
+
   setMarkIndex(u: MarkIndexUpdate): void {
     const b = this.book(u.symbol);
     b.mark = u.mark;
@@ -134,7 +158,9 @@ export class MarketStateStore {
     return {
       symbol, candles, last: b.last, mark: b.mark, index: b.index,
       fundingRate: b.fundingRate, openInterest: b.openInterest,
-      openInterestChange: b.openInterestChange, updatedAt: b.lastEventAt,
+      openInterestChange: b.openInterestChange,
+      bestBid: b.bestBid, bestAsk: b.bestAsk, bestQuoteAt: b.bestQuoteAt,
+      updatedAt: b.lastEventAt,
     };
   }
 

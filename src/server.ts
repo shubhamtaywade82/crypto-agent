@@ -4,7 +4,7 @@ import { streamSSE } from 'hono/streaming';
 import type { AgentHooks } from '@nemesis-oss/ollama-sdk';
 import { runTradingAgent } from './agent.js';
 import { binanceClient } from './config.js';
-import { getKernel } from './kernel.js';
+import { getKernel, type TradingKernel } from './kernel.js';
 import { buildMarketState } from './engines/market-state-engine.js';
 import { ApiAuthenticator, auditCaller } from './security/auth.js';
 import type { AuthVariables } from './security/auth.js';
@@ -105,11 +105,52 @@ app.get('/api/kernel/streams', guard('READ_MARKET'), (c) => {
   });
 });
 
+/** Apply OOS-verified cell promotions to the live registry (V3.1). */
+type WalkForwardResultAsync = Awaited<ReturnType<typeof runWalkForwardFromProvider>>;
+
+const applyOosPromotions = (
+  kernel: TradingKernel,
+  result: WalkForwardResultAsync
+): { cell: string; strategyId: string }[] => {
+  const applied: { cell: string; strategyId: string }[] = [];
+  for (const v of result.oos.cellVerdicts) {
+    if (!v.promoted) continue;
+    const strategyId = v.cell.split('|')[0] ?? v.cell;
+    kernel.strategies.registerOnce(strategyId);
+    const verdict = kernel.strategies.promote(strategyId, v.cell, v.outOfSample.stats);
+    if (verdict.promoted) applied.push({ cell: v.cell, strategyId });
+  }
+  return applied;
+};
+
+const oosResponseBody = (oos: WalkForwardResultAsync['oos']): Record<string, unknown> => ({
+  boundaryOpenTime: oos.boundaryOpenTime,
+  isTrades: oos.isTrades,
+  oosTrades: oos.oosTrades,
+  cellVerdicts: oos.cellVerdicts.map((v) => ({
+    cell: v.cell, promoted: v.promoted, reasons: v.reasons,
+    is: { n: v.inSample.stats.n, expectancyR: Number(v.inSample.stats.expectancyR.toFixed(3)) },
+    oos: {
+      n: v.outOfSample.stats.n,
+      expectancyR: Number(v.outOfSample.stats.expectancyR.toFixed(3)),
+    },
+  })),
+});
+
 app.post('/api/kernel/walkforward/:symbol', guard('ADMIN'), async (c) => {
   const kernel = getKernel();
   const symbol = c.req.param('symbol')?.toUpperCase() ?? 'BTCUSDT';
-  auditCaller(kernel.store, c.get('caller'), 'walkforward.run', { symbol });
+  const body = (await c.req.json().catch(() => ({}))) as { apply?: boolean };
+  auditCaller(kernel.store, c.get('caller'), 'walkforward.run', { symbol, apply: !!body.apply });
   const result = await runWalkForwardFromProvider(kernel.provider, symbol, loadRiskLimits());
+  // V3.1 promotion path (P0-4 + P0-5): a cell becomes LIVE-tradable only
+  // when its in-sample AND out-of-sample stats both pass the frozen gate.
+  const applied = body.apply ? applyOosPromotions(kernel, result) : [];
+  if (applied.length > 0) {
+    auditCaller(kernel.store, c.get('caller'), 'walkforward.apply', {
+      symbol, appliedCells: applied.map((a) => a.cell),
+    });
+  }
   return c.json({
     symbol,
     trades: result.trades.length,
@@ -119,6 +160,8 @@ app.post('/api/kernel/walkforward/:symbol', guard('ADMIN'), async (c) => {
       cell: v.cell, promoted: v.promoted, reasons: v.reasons,
       n: v.stats.n, expectancyR: Number(v.stats.expectancyR.toFixed(3)),
     })),
+    oos: oosResponseBody(result.oos),
+    applied,
   });
 });
 

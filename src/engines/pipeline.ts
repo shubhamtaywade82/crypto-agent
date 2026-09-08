@@ -77,6 +77,14 @@ export interface PipelineDeps {
     readonly tradable: boolean;
     readonly reasons: readonly string[];
   }>;
+  /**
+   * Strategy-cell gate (V3.1 P0-5): ACTIVE strategy + approved cell =
+   * tradable. When present, consulted right after candidate resolution;
+   * a cell the research gate never approved is rejected before sizing.
+   */
+  readonly strategyGate?: (
+    strategyId: string, setupType: string, regime: string
+  ) => { readonly allowed: boolean; readonly reason?: string };
   readonly analyze: (state: MarketState) => Promise<MarketAnalysis>;
   readonly strategize: (request: StrategyRequest) => Promise<StrategyOutcome>;
   readonly challenge?: (

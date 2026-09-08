@@ -7,6 +7,7 @@ import { binanceClient } from './config.js';
 import { BinanceMarketDataProvider } from './infrastructure/binance/market-data-provider.js';
 import type { IExecutionBroker } from './infrastructure/broker/broker.js';
 import type { Logger } from './infrastructure/observability/logger.js';
+import type { MarketStateStore } from './engines/market-state-store.js';
 
 export interface CoinDCXStack {
   readonly client: CoinDCXClient;
@@ -19,13 +20,25 @@ export interface CoinDCXStack {
 }
 
 /** Live cross-venue gate: CoinDCX book vs Binance reference, env-tuned. */
-const buildCrossVenueGate = (client: CoinDCXClient, router: SymbolRouter): CrossVenueGate =>
+const buildCrossVenueGate = (
+  client: CoinDCXClient,
+  router: SymbolRouter,
+  marketStore?: MarketStateStore
+): CrossVenueGate =>
   new CrossVenueGate(
     {
       client,
       router,
       binanceTicker: (symbol: string): Promise<number> =>
         new BinanceMarketDataProvider(binanceClient).getTickerPrice(symbol),
+      // REAL Binance top-of-book from the WS book-ticker stream when the
+      // store carries a fresh quote; the gate falls back to the last-price
+      // proxy only when the book quote is missing/stale (annotated).
+      binanceQuote: (symbol: string): { readonly bid: number; readonly ask: number; readonly at: number } | undefined => {
+        const snap = marketStore?.snapshot(symbol);
+        if (!snap || snap.bestBid === undefined || snap.bestAsk === undefined) return undefined;
+        return { bid: snap.bestBid, ask: snap.bestAsk, at: snap.bestQuoteAt ?? snap.updatedAt };
+      },
     },
     {
       maxBasisBps: Number(process.env.CROSS_VENUE_MAX_BASIS_BPS ?? 50),
@@ -34,7 +47,7 @@ const buildCrossVenueGate = (client: CoinDCXClient, router: SymbolRouter): Cross
   );
 
 /** Live CoinDCX execution stack: broker + routing + contracts + gate. */
-export const buildCoinDCXStack = (log: Logger): CoinDCXStack => {
+export const buildCoinDCXStack = (log: Logger, marketStore?: MarketStateStore): CoinDCXStack => {
   const client = new CoinDCXClient({
     apiKey: process.env.COINDCX_API_KEY,
     apiSecret: process.env.COINDCX_API_SECRET,
@@ -47,7 +60,7 @@ export const buildCoinDCXStack = (log: Logger): CoinDCXStack => {
     ttlMs: Number(process.env.CONTRACT_TTL_MS ?? 5 * 60_000),
     maxStaleMs: Number(process.env.CONTRACT_MAX_STALE_MS ?? 30 * 60_000),
   });
-  const crossVenue = buildCrossVenueGate(client, router);
+  const crossVenue = buildCrossVenueGate(client, router, marketStore);
   log.info('execution venue: coindcx');
   return {
     client,

@@ -4,15 +4,28 @@ import { buildMtfState } from '../engines/mtf-engine.js';
 import { detectSetups } from '../engines/setup-engine.js';
 import type { RiskLimits } from '../domain/risk/risk-config.js';
 import { allCellStatistics, type CellStatistics } from './statistics.js';
-import type { TradeOutcomeRecord } from './trade-ledger.js';
 import { checkGate, DEFAULT_GATE, type PromotionVerdict } from './strategy-registry.js';
+import {
+  defaultReplayConfig, futuresAccounting, legacyAccounting, sizeReplayPosition,
+  toRecord, type FuturesReplayConfig, type SimulatedTrade,
+} from './futures-replay.js';
+import {
+  evaluateOos, type OosEvaluation, type CellOosVerdict, type GateOutcome,
+} from './oos-evaluation.js';
 
 /**
- * Deterministic walk-forward harness: replays historical ladders bar by
- * bar through the DETERMINISTIC layer (structure engine -> setup engine ->
- * fixed-geometry simulation), producing outcome records that feed the SAME
- * per-(setup x regime) statistics and pre-registered gates used live.
- * No LLM, no network — the same input always yields the same dataset.
+ * Deterministic walk-forward harness (V3.1): replays historical ladders
+ * bar by bar through the DETERMINISTIC layer (structure engine -> setup
+ * engine -> futures replay simulator), producing outcome records that
+ * feed the SAME per-(setup x regime) statistics and pre-registered gates
+ * used live. No LLM, no network — the same input always yields the same
+ * dataset.
+ *
+ * Promotion follows TRAIN -> VALIDATE -> FREEZE -> OOS TEST (P0-4): the
+ * ladder is split chronologically; a cell is promotable only when BOTH
+ * the in-sample and the out-of-sample statistics pass the SAME frozen
+ * gate that live promotion uses. The simulator models the real futures
+ * execution surface (see futures-replay.ts, P0-3).
  */
 export interface WalkForwardOptions {
   readonly symbol: string;
@@ -23,33 +36,30 @@ export interface WalkForwardOptions {
   readonly stepBars?: number;
   /** Time stop: unresolved trades close after N base bars. */
   readonly maxHoldBars?: number;
-  /** Round-trip costs (fees + slippage) expressed in R. */
+  /**
+   * LEGACY flat round-trip cost in R. When set, the futures replay cost
+   * model (fees/slippage/funding/sizing) is bypassed in favor of this
+   * constant — kept for backward-compatible deterministic baselines.
+   */
   readonly costR?: number;
+  /** Futures replay surface; defaults derive from `limits`. */
+  readonly replay?: Partial<FuturesReplayConfig>;
   /** Warmup: base bars consumed before the first decision. */
   readonly minBaseBars?: number;
+  /** Last fraction of the ladder treated as out-of-sample (default 0.3). */
+  readonly oosFraction?: number;
 }
 
-export interface SimulatedTrade {
-  readonly decisionId: string;
-  readonly setupType: string;
-  readonly direction: 'LONG' | 'SHORT';
-  readonly regime: string;
-  readonly entry: number;
-  readonly stopLoss: number;
-  readonly takeProfit: number;
-  readonly rMultiple: number;
-  readonly maxAdverseR: number;
-  readonly maxFavorableR: number;
-  readonly outcome: 'TARGET' | 'STOP' | 'TIMEOUT';
-  readonly openedAt: number;
-  readonly closedAt: number;
-}
+export type { FuturesReplayConfig, SimulatedTrade, OosEvaluation, CellOosVerdict, GateOutcome };
 
 export interface WalkForwardResult {
   readonly trades: readonly SimulatedTrade[];
   readonly cells: readonly CellStatistics[];
   readonly verdicts: readonly (PromotionVerdict & { readonly stats: CellStatistics })[];
   readonly totalR: number;
+  readonly oos: OosEvaluation;
+  /** Decisions skipped: geometry not sizeable within the venue spec (live parity). */
+  readonly skippedUnsizable: number;
 }
 
 const WINDOW: Readonly<Record<Timeframe, number>> = {
@@ -71,21 +81,12 @@ const sliceAll = (
 const hasHistory = (sliced: Record<Timeframe, readonly Candle[]>): boolean =>
   TIMEFRAMES.every((tf) => sliced[tf].length >= 200);
 
-const riskPerUnit = (entry: number, stop: number): number => Math.abs(entry - stop);
-
-const toR = (entry: number, stop: number, exit: number, direction: 'LONG' | 'SHORT'): number => {
-  const risk = riskPerUnit(entry, stop);
-  if (risk <= 0) return 0;
-  const move = direction === 'LONG' ? exit - entry : entry - exit;
-  return move / risk;
-};
-
 const excursions = (
   t: { direction: 'LONG' | 'SHORT'; entry: number; stopLoss: number },
   worst: number,
   best: number
 ): { readonly adverse: number; readonly favorable: number } => {
-  const risk = riskPerUnit(t.entry, t.stopLoss);
+  const risk = Math.abs(t.entry - t.stopLoss);
   if (risk <= 0) return { adverse: 0, favorable: 0 };
   const long = t.direction === 'LONG';
   return {
@@ -98,7 +99,11 @@ interface SimContext {
   readonly base: readonly Candle[];
   readonly start: number;
   readonly maxHoldBars: number;
-  readonly costR: number;
+  /** Legacy flat cost in R (bypasses the futures cost model when set). */
+  readonly costR?: number;
+  readonly replay?: FuturesReplayConfig;
+  /** Counts geometry-rejected decisions for harness observability. */
+  readonly onUnsizable?: () => void;
 }
 
 type SimCandidate = {
@@ -112,18 +117,25 @@ interface Resolution {
   readonly closedAt: number;
   readonly worst: number;
   readonly best: number;
+  readonly holdingBars: number;
 }
 
 const finalize = (
   ctx: SimContext, trade: SimCandidate, decisionId: string, res: Resolution
 ): SimulatedTrade => {
   const ex = excursions(trade, res.worst, res.best);
+  const acc = ctx.costR !== undefined
+    ? legacyAccounting(trade, res, ctx.costR)
+    : futuresAccounting(trade, res, ctx.replay!);
   return {
     decisionId, setupType: trade.setupType, direction: trade.direction, regime: trade.regime,
     entry: trade.entry, stopLoss: trade.stopLoss, takeProfit: trade.takeProfit,
-    rMultiple: toR(trade.entry, trade.stopLoss, res.exit, trade.direction) - ctx.costR,
+    rMultiple: acc.rMultiple,
     maxAdverseR: Math.max(0, ex.adverse), maxFavorableR: Math.max(0, ex.favorable),
     outcome: res.outcome, openedAt: ctx.base[ctx.start].openTime, closedAt: res.closedAt,
+    quantity: acc.quantity, notional: acc.notional, leverage: acc.leverage,
+    riskAmount: acc.riskAmount, feesPaid: acc.feesPaid, fundingPaid: acc.fundingPaid,
+    sample: 'IS', // re-tagged by the OOS split in runWalkForward
   };
 };
 
@@ -143,37 +155,20 @@ const simulate = (ctx: SimContext, trade: SimCandidate, decisionId: string): Sim
       return finalize(ctx, trade, decisionId, {
         exit: hitStop ? trade.stopLoss : trade.takeProfit,
         outcome: hitStop ? 'STOP' : 'TARGET', closedAt: bar.openTime, worst, best,
+        holdingBars: j,
       });
     }
   }
   const exitBar = ctx.base[ctx.start + ctx.maxHoldBars] ?? ctx.base[ctx.base.length - 1];
   return finalize(ctx, trade, decisionId, {
     exit: exitBar.close, outcome: 'TIMEOUT', closedAt: exitBar.openTime, worst, best,
+    holdingBars: ctx.maxHoldBars,
   });
 };
 
-const toRecord = (t: SimulatedTrade, symbol: string): TradeOutcomeRecord => ({
-  ...t,
-  symbol,
-  strategyId: t.setupType,
-  plannedRr: riskPerUnit(t.entry, t.stopLoss) > 0
-    ? Math.abs(t.takeProfit - t.entry) / riskPerUnit(t.entry, t.stopLoss)
-    : 0,
-  fundingRate: 0,
-  leverage: 1,
-  riskAmount: 1, // outcomes are expressed in R
-  notional: t.entry,
-  confidence: 0,
-  pnl: t.rMultiple,
-  holdingMinutes: 5,
-  openedAt: t.openedAt,
-  closedAt: t.closedAt,
-});
-
 /** One deterministic decision point: slice, detect, simulate. */
 const decide = (
-  opts: WalkForwardOptions, base: readonly Candle[], i: number,
-  cfg: { readonly maxHoldBars: number; readonly costR: number }
+  opts: WalkForwardOptions, base: readonly Candle[], i: number, ctx: SimContext
 ): SimulatedTrade | undefined => {
   const until = base[i].openTime;
   const sliced = sliceAll(opts.candles, until);
@@ -186,8 +181,14 @@ const decide = (
   });
   const candidate = detectSetups(mtf, opts.limits)[0];
   if (!candidate) return undefined;
+  // Contract-constrained viability (mirrors the live sizer): a trade that
+  // cannot be sized within the venue spec is NEVER simulated.
+  if (ctx.replay && !sizeReplayPosition(ctx.replay, candidate.entry, candidate.stopLoss).ok) {
+    ctx.onUnsizable?.();
+    return undefined;
+  }
   return simulate(
-    { base, start: i, maxHoldBars: cfg.maxHoldBars, costR: cfg.costR },
+    ctx,
     {
       setupType: candidate.type, direction: candidate.direction,
       regime: mtf.state.regime, entry: candidate.entry,
@@ -197,27 +198,73 @@ const decide = (
   );
 };
 
+/** Replay the ladder bar by bar under position-concurrency constraints. */
+interface GenerateArgs {
+  readonly opts: WalkForwardOptions;
+  readonly base: readonly Candle[];
+  readonly replay: FuturesReplayConfig | undefined;
+  readonly stepBars: number;
+  readonly maxHoldBars: number;
+  readonly minBaseBars: number;
+}
+
+interface GeneratedTrades {
+  readonly trades: SimulatedTrade[];
+  /** Decisions skipped because the geometry could not be sized within the venue spec. */
+  readonly skippedUnsizable: number;
+}
+
+const generateTrades = (args: GenerateArgs): GeneratedTrades => {
+  const { opts, base, replay, stepBars, maxHoldBars, minBaseBars } = args;
+  const trades: SimulatedTrade[] = [];
+  let skippedUnsizable = 0;
+  const onUnsizable = (): void => {
+    skippedUnsizable += 1;
+  };
+  /** closedAt of still-open simulated positions (concurrency slots). */
+  const openUntil: number[] = [];
+  for (let i = minBaseBars; i < base.length - 1; i += stepBars) {
+    const now = base[i].openTime;
+    while (openUntil.length > 0 && openUntil[0] <= now) openUntil.shift();
+    if (openUntil.length >= (replay?.maxConcurrentPositions ?? 1)) continue;
+    const trade = decide(
+      opts, base, i,
+      { base, start: i, maxHoldBars, costR: opts.costR, replay, onUnsizable }
+    );
+    if (!trade) continue;
+    trades.push(trade);
+    openUntil.push(trade.closedAt);
+    openUntil.sort((a, b) => a - b);
+  }
+  return { trades, skippedUnsizable };
+};
+
 export const runWalkForward = (opts: WalkForwardOptions): WalkForwardResult => {
   const stepBars = opts.stepBars ?? 6;
   const maxHoldBars = opts.maxHoldBars ?? 60;
-  const costR = opts.costR ?? 0.05;
   const minBaseBars = opts.minBaseBars ?? 260;
+  const replay = opts.costR === undefined
+    ? { ...defaultReplayConfig(opts.symbol, opts.limits), ...opts.replay }
+    : undefined;
   const base = opts.candles[BASE];
-  const trades: SimulatedTrade[] = [];
-  let holdUntil = -1; // one simulated position at a time
-  for (let i = minBaseBars; i < base.length - 1; i += stepBars) {
-    if (i <= holdUntil) continue;
-    const trade = decide(opts, base, i, { maxHoldBars, costR });
-    if (!trade) continue;
-    trades.push(trade);
-    holdUntil = base.findIndex((c) => c.openTime >= trade.closedAt);
-  }
-  const cells = allCellStatistics(trades.map((t) => toRecord(t, opts.symbol)));
+  const { trades, skippedUnsizable } = generateTrades({
+    opts, base, replay, stepBars, maxHoldBars, minBaseBars,
+  });
+  const oos = evaluateOos(trades, base, opts.oosFraction ?? 0.3, opts.symbol);
+  const tagged = trades.map(
+    (t): SimulatedTrade =>
+      t.openedAt >= oos.boundaryOpenTime ? { ...t, sample: 'OOS' } : { ...t, sample: 'IS' }
+  );
+  const cells = allCellStatistics(tagged.map((t) => toRecord(t, opts.symbol)));
   const verdicts = cells.map((stats) => {
     const verdict = checkGate(stats, DEFAULT_GATE);
     return { promoted: verdict.promoted, cell: stats.cell, reasons: verdict.reasons, stats };
   });
-  return { trades, cells, verdicts, totalR: trades.reduce((a, t) => a + t.rMultiple, 0) };
+  return {
+    trades: tagged, cells, verdicts,
+    totalR: tagged.reduce((a, t) => a + t.rMultiple, 0),
+    oos, skippedUnsizable,
+  };
 };
 
 import type { IMarketDataProvider } from '../infrastructure/broker/broker.js';
@@ -227,10 +274,10 @@ export const runWalkForwardFromProvider = async (
   provider: IMarketDataProvider,
   symbol: string,
   limits: RiskLimits,
-  opts: { readonly btcSymbol?: string } = {}
+  opts: { readonly btcSymbol?: string; readonly replay?: Partial<FuturesReplayConfig> } = {}
 ): Promise<WalkForwardResult> => {
   const btcSymbol = opts.btcSymbol ?? 'BTCUSDT';
-  const limitsFor = async (sym: string): Promise<Record<Timeframe, readonly Candle[]>> => ({
+  const backfill = async (sym: string): Promise<Record<Timeframe, readonly Candle[]>> => ({
     '5m': await provider.getKlines(sym, '5m', 1500),
     '15m': await provider.getKlines(sym, '15m', 500),
     '1h': await provider.getKlines(sym, '1h', 400),
@@ -238,9 +285,10 @@ export const runWalkForwardFromProvider = async (
   });
   return runWalkForward({
     symbol,
-    candles: await limitsFor(symbol),
-    btcCandles: await limitsFor(btcSymbol),
+    candles: await backfill(symbol),
+    btcCandles: await backfill(btcSymbol),
     limits,
     minBaseBars: 300,
+    replay: opts.replay,
   });
 };
