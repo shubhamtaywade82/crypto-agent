@@ -42,6 +42,7 @@ const runHeadless = async (): Promise<void> => {
     kernel.killSwitch.resume('paper daemon auto-armed', 'boot');
   }
   kernel.reconciler.start();
+  await kernel.startStreams();
   kernel.log.info('kernel loop starting', { symbols: SYMBOLS, intervalMs: INTERVAL_MS, venue: kernel.venue });
   await runOnce();
   const timer = setInterval(() => { void runOnce(); }, INTERVAL_MS);
@@ -50,6 +51,7 @@ const runHeadless = async (): Promise<void> => {
     kernel.log.info('kernel loop stopping');
     clearInterval(timer);
     kernel.reconciler.stop();
+    kernel.stopStreams();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

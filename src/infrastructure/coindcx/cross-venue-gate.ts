@@ -1,6 +1,6 @@
 import type { CoinDCXClient, OrderBookResponse } from '@nemesis-oss/coindcx-sdk';
 import {
-  buildCrossVenueState, crossVenueExecutionRisk,
+  buildCrossVenueState, crossVenueExecutionRisk, STALE_QUOTE_MS,
   type CrossVenueState, type VenueQuote,
 } from '../../domain/market/cross-venue.js';
 import type { SymbolRouter } from './symbol-router.js';
@@ -44,6 +44,9 @@ export class CrossVenueGate {
   private readonly client: CoinDCXClient;
   private readonly router: SymbolRouter;
   private readonly binanceTicker: (symbol: string) => Promise<number>;
+  private readonly binanceQuote:
+    | ((symbol: string) => { readonly bid: number; readonly ask: number; readonly at: number } | undefined)
+    | undefined;
   private readonly cfg: CrossVenueGateConfig;
 
   constructor(
@@ -51,12 +54,17 @@ export class CrossVenueGate {
       readonly client: CoinDCXClient;
       readonly router: SymbolRouter;
       readonly binanceTicker: (symbol: string) => Promise<number>;
+      /** Real Binance top-of-book source (WS book ticker); undefined = absent/stale. */
+      readonly binanceQuote?:
+        | ((symbol: string) => { readonly bid: number; readonly ask: number; readonly at: number } | undefined)
+        | undefined;
     },
     cfg: CrossVenueGateConfig = {}
   ) {
     this.client = deps.client;
     this.router = deps.router;
     this.binanceTicker = deps.binanceTicker;
+    this.binanceQuote = deps.binanceQuote;
     this.cfg = cfg;
   }
 
@@ -70,12 +78,12 @@ export class CrossVenueGate {
         this.binanceTicker(symbol),
       ]);
       const cdqx = this.coindcxQuote(book);
-      const binance: VenueQuote = {
-        venue: 'BINANCE', bid: binanceLast, ask: binanceLast, last: binanceLast,
-        at: Date.now(),
-      };
+      const binance = this.binanceQuoteOf(symbol, binanceLast);
       const fx = routed.quote === 'INR' ? routed.fxRate : 1;
-      const state = buildCrossVenueState(binance, cdqx, fx);
+      const state: CrossVenueState = {
+        ...buildCrossVenueState(binance, cdqx, fx),
+        binanceQuoteSource: binance.source,
+      };
       const risk = crossVenueExecutionRisk(
         state, this.cfg.maxBasisBps ?? 50, this.cfg.maxSpreadBps ?? 30
       );
@@ -84,6 +92,24 @@ export class CrossVenueGate {
       const reason = err instanceof Error ? err.message : String(err);
       return { tradable: false, reasons: [`cross-venue snapshot unavailable: ${reason}`] };
     }
+  }
+
+  /**
+   * Prefer the REAL Binance book-ticker bid/ask when fresh; fall back to
+   * the last-price proxy (bid=ask=last) only when no fresh book quote is
+   * available — the source is annotated on the state for auditability.
+   */
+  private binanceQuoteOf(
+    symbol: string, last: number
+  ): VenueQuote & { readonly source: 'book_ticker' | 'last_proxy' } {
+    const q = this.binanceQuote?.(symbol);
+    const fresh = q && q.bid > 0 && q.ask > 0 && Date.now() - q.at <= STALE_QUOTE_MS;
+    if (q && fresh) {
+      return {
+        venue: 'BINANCE', bid: q.bid, ask: q.ask, last, at: q.at, source: 'book_ticker',
+      };
+    }
+    return { venue: 'BINANCE', bid: last, ask: last, last, at: Date.now(), source: 'last_proxy' };
   }
 
   private coindcxQuote(book: OrderBookResponse): VenueQuote {

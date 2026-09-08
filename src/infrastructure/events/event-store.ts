@@ -34,6 +34,8 @@ const CRITICAL_TYPES = new Set([
   'order.transition',
   'order.unknown',
   'reconcile',
+  'execution.slippage_breach',
+  'position.closed',
 ]);
 
 export class EventStore {

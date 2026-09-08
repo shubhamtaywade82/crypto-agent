@@ -1,6 +1,9 @@
 import type { IExecutionBroker, PlaceOrderRequest } from '../infrastructure/broker/broker.js';
 import type { OrderStatus } from '../domain/orders/order-state.js';
 import { assertTransition } from '../domain/orders/order-state.js';
+import {
+  breachesBand, marginalFillPrice, type SlippageBreach,
+} from '../domain/orders/slippage.js';
 import type { BrokerOrder } from '../infrastructure/broker/broker.js';
 import type { EventStore } from '../infrastructure/events/event-store.js';
 import type { Logger } from '../infrastructure/observability/logger.js';
@@ -18,6 +21,17 @@ export interface TrackedOrder {
   filledQuantity: number;
   avgFillPrice?: number;
   updatedAt: number;
+  /** When the intent was registered (latency + audit anchor). */
+  registeredAt: number;
+  /** Execution-quality contract: the price the decision was priced against. */
+  expectedPrice?: number;
+  /** Deterministic enforcement band: |slippage| beyond this breaches. */
+  maxSlippageBps?: number;
+  /** Set when a fill landed outside the tolerance band. */
+  slippageBreach?: SlippageBreach;
+  /** Entry/exit lineage for fills attribution. */
+  intentType: 'ENTRY' | 'EXIT' | 'REDUCE';
+  strategyId?: string;
 }
 
 const SUBMIT_TIMEOUT_MS = 10_000;
@@ -40,19 +54,20 @@ interface HydratedOrder {
   readonly quantity: number;
   readonly status: OrderStatus;
   readonly orderId?: string;
+  readonly registeredAt: number;
 }
 
 /** Scan the event log into per-decision register + last-transition views. */
 const scanOrderEvents = (
   source: readonly { at: number; type: string; decisionId?: string; symbol?: string; payload: unknown }[]
 ): Map<string, HydratedOrder> => {
-  const registered = new Map<string, { symbol: string; payload: Record<string, unknown> }>();
+  const registered = new Map<string, { symbol: string; at: number; payload: Record<string, unknown> }>();
   const transitions = new Map<string, { to: OrderStatus; orderId: string | null }[]>();
   for (const e of source) {
     const id = e.decisionId;
     if (!id) continue;
     if (e.type === 'order.registered') {
-      registered.set(id, { symbol: e.symbol ?? '', payload: e.payload as Record<string, unknown> });
+      registered.set(id, { symbol: e.symbol ?? '', at: e.at, payload: e.payload as Record<string, unknown> });
     } else if (e.type === 'order.transition') {
       const p = e.payload as { to?: OrderStatus; orderId?: string | null };
       if (p?.to) {
@@ -77,7 +92,7 @@ const scanOrderEvents = (
 // remains the safety net for any borderline case).
 const hydratableOrder = (
   id: string,
-  reg: { symbol: string; payload: Record<string, unknown> },
+  reg: { symbol: string; at: number; payload: Record<string, unknown> },
   status: OrderStatus,
   last: { to: OrderStatus; orderId: string | null } | undefined
 ): HydratedOrder => ({
@@ -86,6 +101,7 @@ const hydratableOrder = (
   pair: String(reg.payload?.pair ?? ''),
   side: reg.payload?.side === 'sell' ? 'sell' : 'buy',
   quantity: Number(reg.payload?.quantity ?? 0),
+  registeredAt: reg.at,
   status,
   orderId: last?.orderId ?? undefined,
 });
@@ -97,6 +113,10 @@ export class ExecutionEngine {
   private readonly orders = new Map<string, TrackedOrder>();
   /** Optional global gate (kill switch). Returns block reason or null. */
   private submissionGate: (() => string | null) | undefined;
+  /** Optional fills observer (FillsLedger). Fires on every fill delta. */
+  private onFill: ((tracked: TrackedOrder, at: number) => void) | undefined;
+  /** Intents whose remainder cancellation was already attempted. */
+  private readonly cancelRequested = new Set<string>();
 
   constructor(broker: IExecutionBroker, store: EventStore, log?: Logger) {
     this.broker = broker;
@@ -111,6 +131,11 @@ export class ExecutionEngine {
    */
   setSubmissionGate(gate: () => string | null): void {
     this.submissionGate = gate;
+  }
+
+  /** Install the fills observer (execution-quality + live PnL attribution). */
+  setFillHook(hook: (tracked: TrackedOrder, at: number) => void): void {
+    this.onFill = hook;
   }
 
   get(intentId: string): TrackedOrder | undefined {
@@ -137,6 +162,7 @@ export class ExecutionEngine {
       intentId: spec.intentId, pair: spec.pair, symbol: spec.symbol,
       side: spec.side, quantity: spec.quantity, reduceOnly: false,
       status: 'RISK_APPROVED', filledQuantity: 0, updatedAt: Date.now(),
+      registeredAt: Date.now(), intentType: 'ENTRY',
     };
     this.orders.set(spec.intentId, tracked);
     this.store.appendClassified({
@@ -177,6 +203,15 @@ export class ExecutionEngine {
     const tracked = this.orders.get(intentId);
     if (!tracked) throw new Error(`unknown intent ${intentId}`);
     this.assertSubmittable(tracked);
+    // Execution-quality contract: a tolerance band without an anchor
+    // price can never be enforced deterministically — refuse it.
+    if (req.maxSlippageBps !== undefined && req.expectedPrice === undefined) {
+      throw new Error('maxSlippageBps requires expectedPrice (execution-quality contract)');
+    }
+    tracked.expectedPrice = req.expectedPrice;
+    tracked.maxSlippageBps = req.maxSlippageBps;
+    tracked.intentType = req.intentType ?? 'ENTRY';
+    tracked.strategyId = req.strategyId;
     this.transition(tracked, 'SUBMITTING');
     try {
       const placed = await withTimeout(
@@ -198,11 +233,68 @@ export class ExecutionEngine {
 
   /** Fold a broker-side order view into the tracked FSM state. */
   applyBrokerUpdate(tracked: TrackedOrder, update: BrokerOrder): void {
+    const prevFilled = tracked.filledQuantity;
+    const prevAvg = tracked.avgFillPrice;
     tracked.orderId = update.orderId;
     tracked.filledQuantity = update.filledQuantity;
     if (update.avgFillPrice !== undefined) tracked.avgFillPrice = update.avgFillPrice;
     this.transition(tracked, update.status);
     tracked.updatedAt = Date.now();
+    // Fire the fills observer for every NEW fill quantity (submit path and
+    // reconciler fold both go through here, so nothing can bypass it).
+    if (tracked.filledQuantity > prevFilled && tracked.avgFillPrice !== undefined) {
+      this.enforceSlippage(tracked, prevFilled, prevAvg);
+      this.onFill?.(tracked, tracked.updatedAt);
+    }
+  }
+
+  /**
+   * Deterministic slippage enforcement (V3.1 P0-1): every fill delta is
+   * checked against expectedPrice ± maxSlippageBps. A breach is persisted
+   * as a CRITICAL audit event and the un-filled remainder is cancelled so
+   * no further quantity executes beyond the tolerated band.
+   */
+  private enforceSlippage(
+    tracked: TrackedOrder, prevFilled: number, prevAvg: number | undefined
+  ): void {
+    const limit = tracked.maxSlippageBps;
+    if (limit === undefined || tracked.expectedPrice === undefined) return;
+    const marginal = marginalFillPrice(
+      prevFilled, prevAvg, tracked.filledQuantity, tracked.avgFillPrice!
+    );
+    if (!Number.isFinite(marginal) || marginal <= 0) return;
+    const { breach, bps } = breachesBand(tracked.side, marginal, tracked.expectedPrice, limit);
+    if (!breach) return;
+    const breachEvent: SlippageBreach = {
+      expectedPrice: tracked.expectedPrice, fillPrice: marginal, slippageBps: bps,
+      limitBps: limit, at: Date.now(),
+      filledQuantity: tracked.filledQuantity, orderedQuantity: tracked.quantity,
+    };
+    tracked.slippageBreach = breachEvent;
+    this.store.appendClassified({
+      type: 'execution.slippage_breach', symbol: tracked.symbol,
+      decisionId: tracked.intentId, payload: breachEvent as unknown as Record<string, unknown>,
+    });
+    this.log.warn('slippage breach — enforcing tolerance band', {
+      intentId: tracked.intentId, slippageBps: Number(bps.toFixed(2)), limitBps: limit,
+    });
+    this.cancelRemainder(tracked);
+  }
+
+  /** Best-effort cancel of the un-filled remainder after a breach. */
+  private cancelRemainder(tracked: TrackedOrder): void {
+    const cancellable =
+      tracked.filledQuantity < tracked.quantity && tracked.orderId !== undefined &&
+      (tracked.status === 'SUBMITTED' || tracked.status === 'ACKNOWLEDGED' ||
+        tracked.status === 'PARTIALLY_FILLED');
+    if (!cancellable || this.cancelRequested.has(tracked.intentId)) return;
+    this.cancelRequested.add(tracked.intentId);
+    void this.cancel(tracked.intentId).catch((err: unknown): void => {
+      // The reconciler remains the safety net for a failed cancel.
+      this.log.warn('post-breach remainder cancel failed', {
+        intentId: tracked.intentId, err: String(err),
+      });
+    });
   }
 
   /** Cancel an eligible order. */
@@ -251,6 +343,8 @@ export class ExecutionEngine {
         orderId: h.orderId,
         filledQuantity: 0,
         updatedAt: Date.now(),
+        registeredAt: h.registeredAt,
+        intentType: 'ENTRY',
       });
     }
   }

@@ -209,9 +209,30 @@ const proceedToExecution = async (
   return { ...assessed, challenge, status: 'APPROVED' };
 };
 
+/** Strategy-cell gate: only research-approved cells may risk capital. */
+export const strategyCellStage = (
+  deps: PipelineDeps,
+  trace: PipelineTrace,
+  proposal: TradeProposal,
+  regime: string
+): boolean => {
+  if (!deps.strategyGate) return true;
+  const verdict = deps.strategyGate(proposal.setupType, proposal.setupType, regime);
+  if (verdict.allowed) return true;
+  deps.store.append({
+    type: 'strategy.cell_rejected', symbol: trace.symbol,
+    payload: {
+      strategyId: proposal.setupType, cell: `${proposal.setupType}|${regime}`,
+      reason: verdict.reason ?? 'cell not approved',
+    },
+  });
+  return false;
+};
+
 /**
- * Post-strategy stages: candidate resolution -> structural validation ->
- * assess (spec, size, risk) -> reservation -> challenge -> execution.
+ * Post-strategy stages: candidate resolution -> strategy-cell gate ->
+ * structural validation -> assess (spec, size, risk) -> reservation ->
+ * challenge -> execution.
  */
 export const stageExecution = async (
   deps: PipelineDeps,
@@ -226,6 +247,11 @@ export const stageExecution = async (
   }
   const proposal = resolution.proposal;
   const staged: PipelineTrace = { ...trace, proposal };
+
+  // Research gate: ACTIVE strategy AND approved (setup × regime) cell.
+  if (!strategyCellStage(deps, staged, proposal, state.regime)) {
+    return { ...staged, status: 'REJECTED' };
+  }
 
   const validation = validateProposal(
     proposal, deps.limits.minRiskRewardRatio, deps.limits.maxLeverage
