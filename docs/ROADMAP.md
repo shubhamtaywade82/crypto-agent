@@ -168,6 +168,20 @@ outputs through the pipeline and assert zero unapproved orders.
 declared before the outcomes were observed; every ACTIVE strategy reports expectancy,
 sample size, and last-promoted-at (all persisted events, replayable).
 
+### Walk-forward harness ✅ (this branch)
+
+- [x] Deterministic replay: historical ladders bar-by-bar through the structure +
+      setup engines (zero LLM); one position at a time; time-stop + conservative
+      stop-first ambiguity resolution; cost-adjusted R outcomes with MAE/MFE
+- [x] Outcome dataset feeds the SAME `computeCellStatistics` used live; every
+      (setup × regime) cell is evaluated against the SAME frozen `checkGate`
+      thresholds as live promotion — evidence can only come from this pipeline
+- [x] `POST /api/kernel/walkforward/:symbol` (ADMIN) runs it over live-fetched
+      history and returns cells + verdicts with explicit reasons
+
+**Acceptance:** identical input yields byte-identical datasets; a cell can never be
+promoted (live) without statistics that the harness could have produced.
+
 ## Phase 6 — Production — security core ✅ (this branch)
 
 - [x] API authentication + authorization: fail-closed Hono middleware — bearer

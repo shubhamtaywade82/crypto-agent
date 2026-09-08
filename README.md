@@ -126,6 +126,10 @@ Docs: `AGENTS.md` (developer & AI agent guide) · `docs/DEPLOYMENT.md` (server &
 - **Cross-venue execution gate:** CoinDCX order book vs Binance reference (basis/spread
   in bps, staleness health) is checked before risking capital; venue disagreement
   beyond tolerance rejects the trade.
+- **Deterministic walk-forward harness:** replays historical ladders through the
+  structure/setup engines (no LLM, no network), simulates fixed-geometry trades with
+  cost-adjusted R outcomes and MAE/MFE excursions, and evaluates every
+  (setup × regime) cell against the SAME frozen promotion gates used for live trading.
 - **Event-driven market & account runtime:** Binance futures multiplexed WebSocket
   (4-timeframe klines + mark price @1s + mini tickers) feeds a deterministic
   `MarketStateStore`; CoinDCX private WS streams (orders, positions, balances) feed a
@@ -202,6 +206,7 @@ routes (`/health`, `/metrics`) remain public for load balancers.
 | `/api/kernel/killswitch` | `GET` | `READ_AUDIT` | Kill-switch state, reason, actor |
 | `/api/kernel/analytics` | `GET` | `READ_PORTFOLIO` | Performance summary (Sharpe/Sortino), per-strategy/symbol/regime segments, strategy registry, execution quality (slippage/latency/fills) |
 | `/api/kernel/streams` | `GET` | `READ_MARKET` | WS stream health: market/account state, staleness (ms) |
+| `/api/kernel/walkforward/:symbol` | `POST` | `ADMIN` | Deterministic walk-forward backtest: per-(setup×regime) cells + pre-registered gate verdicts |
 | `/api/kernel/killswitch/halt` | `POST` | `CONTROL_TRADE` | Halt all trading (`{ "reason": "..." }`) |
 | `/api/kernel/killswitch/resume` | `POST` | `ADMIN` | Resume trading (reason mandatory, audited) |
 | `/metrics` | `GET` | — (public) | Uptime and heap memory statistics |

@@ -44,7 +44,39 @@ export interface PromotionVerdict {
   readonly reasons: readonly string[];
 }
 
-const DEFAULT_GATE: PromotionGate = {
+/**
+ * Pure pre-registered gate check (no strategy lookup needed). The registry
+ * uses it for LIVE promotion decisions; the walk-forward harness uses it to
+ * evaluate backtest cells against the SAME frozen thresholds.
+ */
+export const checkGate = (
+  stats: {
+    readonly n: number;
+    readonly expectancyR: number;
+    readonly winRate: number;
+    readonly tStat: number;
+    readonly worstR: number;
+  },
+  gate: PromotionGate
+): { readonly promoted: boolean; readonly reasons: readonly string[] } => {
+  const reasons: string[] = [];
+  if (stats.n < gate.minTrades) reasons.push(`sample size ${stats.n} < ${gate.minTrades}`);
+  if (stats.expectancyR < gate.minExpectancyR) {
+    reasons.push(`expectancy ${stats.expectancyR.toFixed(3)}R < ${gate.minExpectancyR}R`);
+  }
+  if (stats.winRate < gate.minWinRate) {
+    reasons.push(`win rate ${stats.winRate.toFixed(2)} < ${gate.minWinRate}`);
+  }
+  if (Math.abs(stats.tStat) < gate.minTStat) {
+    reasons.push(`|t| ${Math.abs(stats.tStat).toFixed(2)} < ${gate.minTStat}`);
+  }
+  if (stats.worstR < gate.maxWorstR) {
+    reasons.push(`worst trade ${stats.worstR.toFixed(2)}R beyond ${gate.maxWorstR}R floor`);
+  }
+  return { promoted: reasons.length === 0, reasons };
+};
+
+export const DEFAULT_GATE: PromotionGate = {
   minTrades: 30,
   minExpectancyR: 0.15,
   minWinRate: 0.4,
