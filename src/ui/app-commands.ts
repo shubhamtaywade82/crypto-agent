@@ -1,0 +1,65 @@
+import type React from 'react';
+import type { ActivityEntry } from './KernelDashboard.js';
+import { getKernel } from '../kernel.js';
+import { ensureSymbolTracked } from '../engines/market-hydrate.js';
+
+export interface CommandCtx {
+  readonly input: string;
+  readonly focusSymbol: string;
+  readonly setFocusSymbol: (s: string) => void;
+  readonly setMode: (m: 'ops' | 'chat') => void;
+  readonly setAuto: React.Dispatch<React.SetStateAction<{ enabled: boolean; interval: number }>>;
+  readonly chat: {
+    runTurn: (p: string) => Promise<void>;
+    runPipelineTrace: (s: string) => Promise<void>;
+    runKernelScan: (s?: readonly string[]) => Promise<void>;
+    clearMessages: () => void;
+    addSystemNote: (m: string) => void;
+  };
+  readonly pushActivity: (t: string) => void;
+  readonly setActivity: React.Dispatch<React.SetStateAction<ActivityEntry[]>>;
+  readonly exit: () => void;
+}
+
+export const runCommand = (ctx: CommandCtx): boolean => {
+  const t = ctx.input.trim();
+  if (!t) return true;
+  if (t === 'exit' || t === 'quit') { ctx.exit(); return true; }
+  if (t === '/clear') { ctx.chat.clearMessages(); ctx.setActivity([]); return true; }
+  if (t === '/chat') { ctx.setMode('chat'); return true; }
+  if (t === '/ops' || t === '/dash') { ctx.setMode('ops'); return true; }
+  if (t === '/help') {
+    ctx.chat.addSystemNote('`/focus SYM` `/scan` `/pipeline SYM` `/chat` `/ops` `/auto on|off` `/halt` `/resume`');
+    return true;
+  }
+  const focusArg = t.startsWith('/focus ') ? t.slice(7) : t.startsWith('/sym ') ? t.slice(5) : '';
+  if (focusArg) {
+    const sym = focusArg.trim().toUpperCase();
+    ctx.setFocusSymbol(sym);
+    ctx.setMode('ops');
+    void ensureSymbolTracked(sym).then((ok) => {
+      ctx.pushActivity(ok ? `Focus → ${sym} (depth loaded)` : `Focus → ${sym} (depth pending)`);
+    });
+    return true;
+  }
+  if (t.startsWith('/halt') || t.startsWith('/kill')) {
+    getKernel().killSwitch.halt(t.slice(5).trim() || 'operator halt', 'operator');
+    ctx.pushActivity('Kill switch ENGAGED'); return true;
+  }
+  if (t.startsWith('/resume')) {
+    getKernel().killSwitch.resume(t.slice(8).trim() || 'operator resume', 'operator');
+    ctx.pushActivity('Kill switch disengaged'); return true;
+  }
+  if (t.startsWith('/auto')) {
+    const arg = t.split(/\s+/)[1]?.toLowerCase();
+    if (arg === 'off') ctx.setAuto((p) => ({ ...p, enabled: false }));
+    else if (arg === 'on') ctx.setAuto((p) => ({ ...p, enabled: true }));
+    else ctx.setAuto((p) => ({ ...p, enabled: !p.enabled }));
+    return true;
+  }
+  const pSym = t.startsWith('/pipeline') ? t.split(/\s+/)[1]?.toUpperCase() || ctx.focusSymbol
+    : t.startsWith('/scan ') ? t.slice(6).trim().toUpperCase() : null;
+  if (pSym) { void ctx.chat.runPipelineTrace(pSym); return true; }
+  if (t === '/scan') { void ctx.chat.runKernelScan(); return true; }
+  return false;
+};

@@ -24,39 +24,40 @@ export interface StreamBuildArgs {
   readonly provider: IMarketDataProvider;
   readonly log: Logger;
   readonly venue: 'paper' | 'coindcx';
+  /** Shared runtime store — MUST be the same instance the kernel/TUI reads. */
+  readonly marketStore: MarketStateStore;
+  readonly accountCache: PortfolioStateStore;
   /** Live CoinDCX client (venue === 'coindcx'); enables the account stream. */
   readonly coindcxClient?: CoinDCXClient;
   /** REST recovery: full broker snapshot for the account cache. */
   readonly resyncAccount?: () => Promise<void>;
 }
 
-const watchlist = (): string[] => {
-  const configured = (process.env.WATCHLIST ?? 'BTCUSDT')
-    .split(',')
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
-  // BTCUSDT is the macro ladder every pipeline run needs — always followed.
-  return [...new Set([...configured, 'BTCUSDT'])];
+/** Symbols the kernel WS + pipeline track (shared with the TUI dashboard). */
+export const kernelWatchSymbols = (): string[] => {
+  const kernelSyms = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT')
+    .split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  const watchSyms = (process.env.WATCHLIST ?? '')
+    .split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  return [...new Set([...kernelSyms, ...watchSyms, 'BTCUSDT'])];
 };
 
 export const buildStreams = (args: StreamBuildArgs): KernelStreams => {
-  const marketStore = new MarketStateStore();
-  const accountCache = new PortfolioStateStore();
   const market = process.env.MARKET_STREAM_ENABLED === 'false'
     ? undefined
-    : new BinanceMarketStream({ store: marketStore, provider: args.provider, audit: args.audit });
+    : new BinanceMarketStream({ store: args.marketStore, provider: args.provider, audit: args.audit });
   const account = args.coindcxClient && process.env.ACCOUNT_STREAM_ENABLED !== 'false'
     ? new CoinDCXAccountStream({
-        client: args.coindcxClient, store: accountCache, audit: args.audit,
+        client: args.coindcxClient, store: args.accountCache, audit: args.audit,
         resync: args.resyncAccount, log: args.log,
       })
     : undefined;
-  return { marketStore, accountCache, market, account };
+  return { marketStore: args.marketStore, accountCache: args.accountCache, market, account };
 };
 
 /** Boot the event-driven runtime (idempotent). */
 export const startStreams = async (streams: KernelStreams, log: Logger): Promise<void> => {
-  const symbols = watchlist();
+  const symbols = kernelWatchSymbols();
   if (streams.market) {
     await streams.market.subscribe(symbols);
     log.info('market stream started', { symbols });

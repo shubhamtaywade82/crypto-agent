@@ -59,6 +59,10 @@ const fakeProvider = (): IMarketDataProvider =>
     getMarkIndex: async () => ({ mark: LAST, index: LAST * 0.999 }),
     getFundingRate: async () => 0.0001,
     getOpenInterest: async () => ({ oi: 1_000, changePct: 0.5 }),
+    getOrderBookDepth: async () => ({
+      bids: [{ price: 100, qty: 5 }], asks: [{ price: 101, qty: 3 }],
+    }),
+    getAggTrades: async () => [],
   }) as unknown as IMarketDataProvider;
 
 const makeDeps = (over: Partial<PipelineDeps> = {}): PipelineDeps => {

@@ -3,6 +3,7 @@ import type { MarketState, Timeframe } from '../domain/market/types.js';
 import type { RiskLimits } from '../domain/risk/risk-config.js';
 import type { MtfResult } from './mtf-engine.js';
 import { makeId } from '../domain/primitives.js';
+import { microstructureConfidenceDelta } from './microstructure-engine.js';
 
 type RawSetup = {
   readonly type: SetupType;
@@ -79,7 +80,8 @@ const confidenceOf = (state: MarketState, direction: TradeDirection, alignment: 
   const regimeBonus =
     (direction === 'LONG' && state.regime === 'TREND_UP') ||
     (direction === 'SHORT' && state.regime === 'TREND_DOWN') ? 0.08 : 0;
-  return Math.max(0.05, Math.min(0.95, 0.4 + 0.1 * alignment + regimeBonus - volPenalty));
+  const flowAdj = microstructureConfidenceDelta(state.microstructure, direction);
+  return Math.max(0.05, Math.min(0.95, 0.4 + 0.1 * alignment + regimeBonus - volPenalty + flowAdj));
 };
 
 const finalize = (

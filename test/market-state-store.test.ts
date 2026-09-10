@@ -87,6 +87,25 @@ describe('MarketStateStore — prices, futures context, freshness', () => {
   });
 });
 
+describe('MarketStateStore — microstructure', () => {
+  it('stores depth, trades and computes microstructure on snapshot', () => {
+    const store = new MarketStateStore();
+    store.setTicker({ symbol: 'BTCUSDT', price: 100, at: 1 });
+    store.setDepth({
+      symbol: 'BTCUSDT',
+      bids: [{ price: 99.9, qty: 10 }],
+      asks: [{ price: 100.1, qty: 4 }],
+      at: 2,
+    });
+    store.pushTrade('BTCUSDT', { price: 100, qty: 1, at: 3, buyerIsMaker: false });
+    store.pushTrade('BTCUSDT', { price: 100, qty: 2, at: 4, buyerIsMaker: true });
+    const snap = store.snapshot('BTCUSDT')!;
+    expect(snap.bids).toHaveLength(1);
+    expect(snap.trades).toHaveLength(2);
+    expect(snap.microstructure?.imbalance).toBeGreaterThan(0);
+  });
+});
+
 describe('MarketStateStore — property invariants', () => {
   it('arbitrary update sequences keep candles sorted and unique per timeframe', () => {
     const arb = fc

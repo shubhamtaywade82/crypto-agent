@@ -1,5 +1,6 @@
 import type { BinanceClient } from '@nemesis-oss/binance-sdk';
 import type { Candle, Timeframe } from '../../domain/market/types.js';
+import type { BookLevel, TradePrint } from '../../domain/market/microstructure.js';
 import type { IMarketDataProvider } from '../broker/broker.js';
 
 const FAPI_INTERVAL: Readonly<Record<Timeframe, '5m' | '15m' | '1h' | '4h'>> = {
@@ -61,5 +62,22 @@ export class BinanceMarketDataProvider implements IMarketDataProvider {
       changePct = 0;
     }
     return { oi, changePct: Number(changePct.toFixed(3)) };
+  }
+
+  async getOrderBookDepth(symbol: string, limit: number): Promise<{ bids: BookLevel[]; asks: BookLevel[] }> {
+    const raw = await this.client.futures.market.depth(symbol, limit);
+    const bids = (raw.bids ?? []).filter((l) => l.price > 0 && l.qty > 0);
+    const asks = (raw.asks ?? []).filter((l) => l.price > 0 && l.qty > 0);
+    return { bids, asks };
+  }
+
+  async getAggTrades(symbol: string, limit: number): Promise<TradePrint[]> {
+    const raw = await this.client.futures.market.aggTrades(symbol, { limit });
+    return raw.map((t) => ({
+      price: t.p,
+      qty: t.q,
+      at: t.T,
+      buyerIsMaker: t.m,
+    }));
   }
 }

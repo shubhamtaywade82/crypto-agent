@@ -297,6 +297,7 @@ const buildParts = (ctx: KernelContext, log: Logger): KernelParts => {
     fills: ctx.fills,
     streams: buildStreams({
       audit: ctx.store, provider, log, venue: ctx.venue,
+      marketStore: ctx.marketStore, accountCache: ctx.accountCache,
       coindcxClient: ctx.coindcxClient, resyncAccount,
     }),
     portfolio: buildPortfolio({

@@ -1,5 +1,7 @@
 import type { Candle, Timeframe } from '../domain/market/types.js';
 import { TIMEFRAMES } from '../domain/market/types.js';
+import type { BookLevel, MicrostructureView, TradePrint } from '../domain/market/microstructure.js';
+import { computeMicrostructure } from './microstructure-engine.js';
 
 /**
  * In-memory market-state cache fed by the Binance WS streams (event-driven
@@ -20,6 +22,10 @@ export interface SymbolSnapshot {
   readonly bestBid?: number;
   readonly bestAsk?: number;
   readonly bestQuoteAt?: number;
+  readonly bids: readonly BookLevel[];
+  readonly asks: readonly BookLevel[];
+  readonly trades: readonly TradePrint[];
+  readonly microstructure?: MicrostructureView;
   readonly updatedAt: number;
 }
 
@@ -58,6 +64,16 @@ export interface OpenInterestUpdate {
   readonly at: number;
 }
 
+export interface DepthUpdate {
+  readonly symbol: string;
+  readonly bids: readonly BookLevel[];
+  readonly asks: readonly BookLevel[];
+  readonly at: number;
+}
+
+const TRADE_CAP = 80;
+const DEPTH_LEVELS = 10;
+
 const CANDLE_CAP: Readonly<Record<Timeframe, number>> = {
   '5m': 300, '15m': 300, '1h': 300, '4h': 220,
 };
@@ -74,11 +90,17 @@ interface SymbolBook {
   bestBid?: number;
   bestAsk?: number;
   bestQuoteAt?: number;
+  bids: BookLevel[];
+  asks: BookLevel[];
+  trades: TradePrint[];
   lastEventAt?: number;
 }
 
 const emptyBook = (): SymbolBook => ({
   candles: new Map(TIMEFRAMES.map((tf) => [tf, new Map<number, Candle>()] as const)),
+  bids: [],
+  asks: [],
+  trades: [],
 });
 
 const capCandles = (map: Map<number, Candle>, cap: number): Candle[] => {
@@ -148,6 +170,31 @@ export class MarketStateStore {
     this.touch(b, u.at);
   }
 
+  setDepth(u: DepthUpdate): void {
+    const b = this.book(u.symbol);
+    b.bids = u.bids.slice(0, DEPTH_LEVELS);
+    b.asks = u.asks.slice(0, DEPTH_LEVELS);
+    if (b.bids[0] && b.asks[0]) {
+      b.bestBid = b.bids[0].price;
+      b.bestAsk = b.asks[0].price;
+      b.bestQuoteAt = u.at;
+    }
+    this.touch(b, u.at);
+  }
+
+  pushTrade(symbol: string, trade: TradePrint): void {
+    const b = this.book(symbol);
+    b.trades = [...b.trades, trade].slice(-TRADE_CAP);
+    this.touch(b, trade.at);
+  }
+
+  microstructureOf(symbol: string): MicrostructureView | undefined {
+    const b = this.books.get(symbol);
+    if (!b || b.bids.length === 0 || b.asks.length === 0) return undefined;
+    const mid = b.last ?? (b.bestBid! + b.bestAsk!) / 2;
+    return computeMicrostructure({ bids: b.bids, asks: b.asks }, b.trades, mid, b.lastEventAt ?? Date.now());
+  }
+
   /** Full snapshot for one symbol (undefined when nothing was ever stored). */
   snapshot(symbol: string): SymbolSnapshot | undefined {
     const b = this.books.get(symbol);
@@ -160,6 +207,8 @@ export class MarketStateStore {
       fundingRate: b.fundingRate, openInterest: b.openInterest,
       openInterestChange: b.openInterestChange,
       bestBid: b.bestBid, bestAsk: b.bestAsk, bestQuoteAt: b.bestQuoteAt,
+      bids: b.bids, asks: b.asks, trades: b.trades,
+      microstructure: this.microstructureOf(symbol),
       updatedAt: b.lastEventAt,
     };
   }

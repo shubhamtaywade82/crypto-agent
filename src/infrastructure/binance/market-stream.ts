@@ -1,17 +1,16 @@
 import { parseWsPayload } from '@nemesis-oss/binance-sdk';
-import type { WsKlinePayload, WsMarkPricePayload, WsMiniTickerPayload } from '@nemesis-oss/binance-sdk';
+import type {
+  WsAggTradePayload, WsDepthUpdatePayload, WsKlinePayload, WsMarkPricePayload, WsMiniTickerPayload,
+} from '@nemesis-oss/binance-sdk';
+import type { BookLevel } from '../../domain/market/microstructure.js';
 import type { Candle, Timeframe } from '../../domain/market/types.js';
 import { TIMEFRAMES } from '../../domain/market/types.js';
 import type { IMarketDataProvider } from '../broker/broker.js';
 import type { EventStore } from '../events/event-store.js';
 import type { MarketStateStore } from '../../engines/market-state-store.js';
 import { createLogger, type Logger } from '../observability/logger.js';
+import { nativeWsFactory } from './market-ws-native.js';
 
-/**
- * Binance futures multiplexed stream -> MarketStateStore. The socket is
- * injected (WsFactory) so unit tests run without a network. REST remains
- * the cold-start backfill and post-reconnect gap-recovery path.
- */
 export type StreamState = 'IDLE' | 'CONNECTING' | 'LIVE' | 'RECONNECTING' | 'DOWN';
 
 export interface WsHandlers {
@@ -55,32 +54,13 @@ const toCandle = (k: WsKlinePayload['k']): Candle => ({
 const tfOf = (interval: string): Timeframe =>
   TIMEFRAMES.find((tf) => tf === interval) ?? '5m';
 
-/** Exponential backoff with half-decile jitter, capped. */
+const depthLevels = (rows: readonly [string, string][]): BookLevel[] =>
+  rows
+    .map(([p, q]) => ({ price: Number(p), qty: Number(q) }))
+    .filter((l) => l.price > 0 && l.qty > 0);
+
 const jittered = (attempt: number, baseMs: number, capMs: number): number =>
   Math.min(capMs, baseMs * 2 ** attempt) * (0.5 + Math.random() * 0.5);
-
-/** Minimal structural type for Node's native WebSocket (typed locally). */
-interface NativeWebSocketLike {
-  addEventListener(type: 'open', cb: () => void): void;
-  addEventListener(type: 'message', cb: (ev: { readonly data: unknown }) => void): void;
-  addEventListener(type: 'close', cb: (ev: { readonly code: number }) => void): void;
-  addEventListener(type: 'error', cb: () => void): void;
-  close(): void;
-}
-
-const nativeWsFactory: WsFactory = (url, handlers) => {
-  const Ctor = (globalThis as typeof globalThis & {
-    WebSocket: new (url: string) => NativeWebSocketLike;
-  }).WebSocket;
-  const socket = new Ctor(url);
-  socket.addEventListener('open', (): void => handlers.onOpen());
-  socket.addEventListener('message', (ev): void => {
-    if (typeof ev.data === 'string') handlers.onMessage(ev.data);
-  });
-  socket.addEventListener('close', (ev): void => handlers.onClose(`code ${ev.code}`));
-  socket.addEventListener('error', (): void => undefined); // close always follows an error
-  return { close: (): void => socket.close() };
-};
 
 export class BinanceMarketStream {
   private readonly store: MarketStateStore;
@@ -137,7 +117,7 @@ export class BinanceMarketStream {
     });
   }
 
-  /** Add symbols to the watchlist: REST-seed ladders, then connect. */
+  /** Add symbols to the watchlist: REST-seed ladders, then connect (reconnect if URL grows). */
   async subscribe(symbols: readonly string[]): Promise<void> {
     const added = symbols.filter((s) => !this.symbols.has(s));
     if (added.length === 0) return;
@@ -146,7 +126,26 @@ export class BinanceMarketStream {
       await this.backfill(s);
     }
     this.stopped = false;
-    if (!this.socket) this.connect();
+    this.reconnectMultiplex();
+  }
+
+  /** Track + REST-seed a symbol; refresh micro if already on the watchlist. */
+  async ensure(symbol: string): Promise<void> {
+    const sym = symbol.toUpperCase();
+    if (!this.symbols.has(sym)) {
+      await this.subscribe([sym]);
+      return;
+    }
+    await this.backfillMicro(sym);
+  }
+
+  private reconnectMultiplex(): void {
+    if (this.socket) {
+      this.socket.close();
+      this.socket = undefined;
+    }
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.connect();
   }
 
   /** Graceful shutdown: no further reconnects after close. */
@@ -159,7 +158,6 @@ export class BinanceMarketStream {
     this.setState('IDLE');
   }
 
-  /** REST seed of the full candle ladder so the store is pipeline-ready. */
   private async backfill(symbol: string): Promise<void> {
     const at = this.now();
     for (const tf of TIMEFRAMES) {
@@ -169,6 +167,20 @@ export class BinanceMarketStream {
       } catch (err) {
         this.log.warn('kline backfill failed', { symbol, tf, err: String(err) });
       }
+    }
+    await this.backfillMicro(symbol, at);
+  }
+
+  private async backfillMicro(symbol: string, at = this.now()): Promise<void> {
+    try {
+      const [depth, trades] = await Promise.all([
+        this.provider.getOrderBookDepth(symbol, 20),
+        this.provider.getAggTrades(symbol, 50),
+      ]);
+      this.store.setDepth({ symbol, bids: depth.bids, asks: depth.asks, at });
+      for (const t of trades) this.store.pushTrade(symbol, t);
+    } catch (err) {
+      this.log.warn('microstructure backfill failed', { symbol, err: String(err) });
     }
   }
 
@@ -189,6 +201,8 @@ export class BinanceMarketStream {
       `${s.toLowerCase()}@markPrice@1s`,
       `${s.toLowerCase()}@miniTicker`,
       `${s.toLowerCase()}@bookTicker`,
+      `${s.toLowerCase()}@depth20@100ms`,
+      `${s.toLowerCase()}@aggTrade`,
     ]);
     return this.url + streams.join('/');
   }
@@ -264,6 +278,18 @@ export class BinanceMarketStream {
     if (name.includes('@miniTicker')) {
       const t = payload as WsMiniTickerPayload;
       this.store.setTicker({ symbol: t.s, price: t.c, at });
+      return;
+    }
+    if (name.includes('@depth')) {
+      const d = payload as WsDepthUpdatePayload;
+      const bids = depthLevels(d.b).sort((a, b) => b.price - a.price);
+      const asks = depthLevels(d.a).sort((a, b) => a.price - b.price);
+      this.store.setDepth({ symbol: d.s, bids, asks, at });
+      return;
+    }
+    if (name.includes('@aggTrade')) {
+      const t = payload as WsAggTradePayload;
+      this.store.pushTrade(t.s, { price: t.p, qty: t.q, at: t.T, buyerIsMaker: t.m });
     }
   }
 }

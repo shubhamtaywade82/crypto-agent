@@ -6,6 +6,7 @@ import type {
   TimeframeState,
   Trend,
 } from '../domain/market/types.js';
+import type { MicrostructureView } from '../domain/market/microstructure.js';
 import { TIMEFRAMES } from '../domain/market/types.js';
 import { buildTimeframeState, classifyRegime } from './timeframe-engine.js';
 import { analyzeStructure, detectSweep, liquidityLevels } from './structure-engine.js';
@@ -17,6 +18,7 @@ export interface MtfInputs {
   readonly btcCandles: Readonly<Record<Timeframe, readonly Candle[]>>;
   readonly price: { last: number; mark: number; index: number };
   readonly futures: { fundingRate: number; openInterest: number; openInterestChange: number };
+  readonly microstructure?: MicrostructureView;
 }
 
 export interface MtfResult {
@@ -63,12 +65,7 @@ const assembleState = (
     regime,
     btcRegime,
     timeframes: states,
-    liquidity: {
-      nearestHigh: levels.nearestHigh,
-      nearestLow: levels.nearestLow,
-      sweepDetected: sweep.detected,
-      sweepSide: sweep.side,
-    },
+    liquidity: { nearestHigh: levels.nearestHigh, nearestLow: levels.nearestLow, sweepDetected: sweep.detected, sweepSide: sweep.side },
     futures: {
       fundingRate: inputs.futures.fundingRate,
       openInterest: inputs.futures.openInterest,
@@ -76,6 +73,7 @@ const assembleState = (
       markPrice: inputs.price.mark,
       indexPrice: inputs.price.index,
     },
+    microstructure: inputs.microstructure,
   };
 };
 

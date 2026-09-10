@@ -1,4 +1,5 @@
 import type { Candle, Timeframe } from '../../domain/market/types.js';
+import type { BookLevel, TradePrint } from '../../domain/market/microstructure.js';
 import type { ContractSpec } from '../../domain/futures/contract-spec.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
 
@@ -92,6 +93,8 @@ export interface IMarketDataProvider {
   getMarkIndex(symbol: string): Promise<{ mark: number; index: number }>;
   getFundingRate(symbol: string): Promise<number>;
   getOpenInterest(symbol: string): Promise<{ oi: number; changePct: number }>;
+  getOrderBookDepth(symbol: string, limit: number): Promise<{ bids: BookLevel[]; asks: BookLevel[] }>;
+  getAggTrades(symbol: string, limit: number): Promise<TradePrint[]>;
 }
 
 /** Order/position/account execution (CoinDCX in this system). */

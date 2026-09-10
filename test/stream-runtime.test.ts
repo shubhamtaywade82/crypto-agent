@@ -156,6 +156,11 @@ describe('runTradingPipeline — stream vs REST provenance', () => {
         counter.rest++;
         return { oi: 1000, changePct: 0 };
       },
+      getOrderBookDepth: async (): Promise<{ bids: { price: number; qty: number }[]; asks: { price: number; qty: number }[] }> => {
+        counter.rest++;
+        return { bids: [{ price: 64_999, qty: 1 }], asks: [{ price: 65_001, qty: 1 }] };
+      },
+      getAggTrades: async (): Promise<[]> => [],
     };
     return {
       provider,

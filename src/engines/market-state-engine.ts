@@ -3,6 +3,7 @@ import { TIMEFRAMES } from '../domain/market/types.js';
 import type { IMarketDataProvider } from '../infrastructure/broker/broker.js';
 import { buildMtfState, type MtfResult } from './mtf-engine.js';
 import type { MarketStateStore } from './market-state-store.js';
+import { computeMicrostructure } from './microstructure-engine.js';
 
 const CANDLE_LIMITS: Readonly<Record<Timeframe, number>> = {
   '5m': 300,
@@ -39,14 +40,19 @@ export const buildMarketState = async (
   opts: BuildStateOptions = {}
 ): Promise<MtfResult> => {
   const btcSymbol = opts.btcSymbol ?? 'BTCUSDT';
-  const [candles, btcCandles, last, markIndex, funding, oi] = await Promise.all([
+  const [candles, btcCandles, last, markIndex, funding, oi, depth, trades] = await Promise.all([
     fetchCandles(provider, symbol, TIMEFRAMES),
     fetchCandles(provider, btcSymbol, TIMEFRAMES),
     provider.getTickerPrice(symbol),
     provider.getMarkIndex(symbol),
     provider.getFundingRate(symbol),
     provider.getOpenInterest(symbol),
+    provider.getOrderBookDepth(symbol, 20),
+    provider.getAggTrades(symbol, 50),
   ]);
+  const micro = depth.bids.length > 0 && depth.asks.length > 0
+    ? computeMicrostructure(depth, trades, last)
+    : undefined;
 
   return buildMtfState({
     symbol,
@@ -58,6 +64,7 @@ export const buildMarketState = async (
       openInterest: oi.oi,
       openInterestChange: oi.changePct,
     },
+    microstructure: micro,
   });
 };
 
@@ -92,6 +99,7 @@ export const buildMtfFromStore = (
       openInterest: snap.openInterest ?? 0,
       openInterestChange: snap.openInterestChange ?? 0,
     },
+    microstructure: snap.microstructure,
   });
 };
 

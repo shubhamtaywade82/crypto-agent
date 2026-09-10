@@ -1,3 +1,5 @@
+import type { MicrostructureView } from './microstructure.js';
+
 /** A single OHLCV candle (values as strings/numbers from exchanges). */
 export interface Candle {
   readonly openTime: number;
@@ -97,4 +99,6 @@ export interface MarketState {
   readonly timeframes: Readonly<Record<Timeframe, TimeframeState>>;
   readonly liquidity: LiquidityView;
   readonly futures: FuturesContext;
+  /** Live depth + agg-trade flow; absent when microstructure feeds are unavailable. */
+  readonly microstructure?: MicrostructureView;
 }

@@ -57,6 +57,10 @@ const harness = (opts?: { maxRetries?: number }): Harness => {
     getMarkIndex: async () => ({ mark: 104, index: 103 }),
     getFundingRate: async () => 0.0001,
     getOpenInterest: async () => ({ oi: 1, changePct: 0 }),
+    getOrderBookDepth: async () => ({
+      bids: [{ price: 104, qty: 2 }], asks: [{ price: 105, qty: 1 }],
+    }),
+    getAggTrades: async () => [],
   } as unknown as IMarketDataProvider;
   const factory: WsFactory = (url, handlers) => new FakeSocket(url, handlers);
   const stream = new BinanceMarketStream({
