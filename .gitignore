@@ -142,3 +142,8 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Vendored @nemesis-oss packages ship prebuilt dist/ (built from
+# shubhamtaywade82/market-intelligence) so CI, Docker, and fresh clones
+# resolve them without external paths.
+!vendor/*/dist/

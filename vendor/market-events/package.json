@@ -1,0 +1,17 @@
+{
+  "name": "@nemesis-oss/market-events",
+  "version": "0.1.0",
+  "description": "Deterministic market-event and price-structure engine (vendored from shubhamtaywade82/market-intelligence)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "decimal.js": "^10.4.3"
+  }
+}

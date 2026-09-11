@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { getKernel } from '../src/kernel.js';
 import { buildTraderBrief } from '../src/ui/overview-brief.js';
 import type { PipelineTrace } from '../src/engines/pipeline.js';
+
+// The kernel boots fail-safe: the kill switch starts HALTED until an explicit
+// resume (see test/kernel-security.test.ts). Tests that expect a tradeable
+// stance must resume it first, mirroring operator startup.
+const resumeKillSwitch = (): void => {
+  const k = getKernel();
+  if (k.killSwitch.halted) {
+    k.killSwitch.resume('test: simulated operator resume', 'test-runner', { persist: false });
+  }
+};
 
 describe('buildTraderBrief', () => {
   it('returns MONITOR when no pipeline trace exists', () => {
@@ -10,6 +21,7 @@ describe('buildTraderBrief', () => {
   });
 
   it('returns LONG when execute approved with long setup', () => {
+    resumeKillSwitch();
     const trace: PipelineTrace = {
       symbol: 'BTCUSDT',
       ranAt: Date.now(),

@@ -3,6 +3,9 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
+# Vendored @nemesis-oss packages (with prebuilt dist/) must be present
+# before npm install so the file: dependencies resolve inside the image.
+COPY vendor ./vendor
 RUN npm install
 
 COPY tsconfig.json ./
@@ -20,6 +23,7 @@ ENV NODE_ENV=production
 ENV PORT=3002
 
 COPY package*.json ./
+COPY vendor ./vendor
 RUN npm install --omit=dev
 
 COPY --from=builder /app/dist ./dist
