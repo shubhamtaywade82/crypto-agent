@@ -1,3 +1,7 @@
+if (!process.argv.includes('--headless') && !process.argv.includes('--daemon') && !process.env.LOG_LEVEL) {
+  process.env.LOG_LEVEL = 'warn';
+}
+
 import { bootEventCouncil } from './engines/event-council.js';
 import { getKernel } from './kernel.js';
 import { startInteractiveRepl } from './main.js';

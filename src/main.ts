@@ -1,4 +1,9 @@
 import 'dotenv/config';
+
+if (process.stdout.isTTY && !process.env.LOG_LEVEL) {
+  process.env.LOG_LEVEL = 'warn';
+}
+
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import React from 'react';
@@ -72,14 +77,17 @@ const executeWithStreaming = async (prompt: string): Promise<void> => {
 export const startInteractiveRepl = async (): Promise<void> => {
   if (process.stdin.isTTY) {
     if (!process.env.LOG_LEVEL) process.env.LOG_LEVEL = 'warn';
+    process.stdout.write('\x1b[2J\x1b[H');
     const kernel = getKernel();
     if (kernel.killSwitch.halted && kernel.venue === 'paper') {
       kernel.killSwitch.resume('paper mode auto-armed', 'boot');
     }
     const { waitUntilExit } = render(React.createElement(App), {
       exitOnCtrlC: true,
+      patchConsole: false,
     });
     await waitUntilExit();
+    process.stdout.write('\n');
     return;
   }
   const rl = readline.createInterface({ input, output });

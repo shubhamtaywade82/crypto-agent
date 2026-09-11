@@ -2,10 +2,10 @@
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
 const LEVELS: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
-const minLevel: number = LEVELS[(process.env.LOG_LEVEL as Level) ?? 'info'] ?? 20;
+const minLevel = (): number => LEVELS[(process.env.LOG_LEVEL as Level) ?? 'info'] ?? 20;
 
 const emit = (level: Level, component: string, msg: string, meta?: unknown): void => {
-  if (LEVELS[level] < minLevel) return;
+  if (LEVELS[level] < minLevel()) return;
   const line = {
     ts: new Date().toISOString(),
     level,
