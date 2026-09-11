@@ -47,4 +47,25 @@ describe('EventStore — durability contract', () => {
     ).not.toThrow();
     expect(store.healthy).toBe(false);
   });
+
+  it('caps the in-memory buffer so long sessions do not grow heap unbounded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'evcap-'));
+    const store = new EventStore({ filePath: join(dir, 'events.jsonl'), durable: false });
+    for (let i = 0; i < 6000; i++) {
+      store.append({ type: 'portfolio.equity', payload: { equity: 10_000 + i } });
+    }
+    expect(store.readAll(3).map((e) => (e.payload as { equity: number }).equity)).toEqual([15_997, 15_998, 15_999]);
+    expect(store.tail(100).length).toBe(100);
+  });
+
+  it('readAll tails from disk without loading the full audit file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'evtail-'));
+    const filePath = join(dir, 'events.jsonl');
+    const store = new EventStore({ filePath, durable: false });
+    for (let i = 0; i < 1200; i++) {
+      store.append({ type: 'portfolio.equity', payload: { equity: i } });
+    }
+    const fresh = new EventStore({ filePath, durable: false });
+    expect(fresh.readAll(5).map((e) => (e.payload as { equity: number }).equity)).toEqual([1195, 1196, 1197, 1198, 1199]);
+  });
 });

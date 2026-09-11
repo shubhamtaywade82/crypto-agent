@@ -31,8 +31,14 @@ const utcDay = (at: number): number => Math.floor(at / 86_400_000);
  * This is the data bridge between trading and learning: outcomes land
  * here first, statistically-validated promotion comes later.
  */
+const EQUITY_PERSIST_INTERVAL_MS = 60_000;
+const EQUITY_PERSIST_MIN_DELTA = 1;
+const EQUITY_PERSIST_MIN_PCT = 0.05;
+
 export class PerformanceEngine {
   private readonly store?: EventStore;
+  private lastPersistedEquity?: number;
+  private lastPersistedAt = 0;
 
   /** UTC-day bucketed realized PnL: day -> pnl. */
   private readonly dailyPnl = new Map<number, number>();
@@ -67,7 +73,15 @@ export class PerformanceEngine {
    * Feed the current equity. Tracks the high-water mark and the
    * peak-to-valley drawdown that gates the EMERGENCY circuit state.
    */
-  recordEquity(equity: number, _at = Date.now(), opts: { persist?: boolean } = {}): void {
+  private shouldPersistEquity(equity: number, at: number): boolean {
+    if (this.lastPersistedEquity === undefined) return true;
+    const elapsed = at - this.lastPersistedAt;
+    const delta = Math.abs(equity - this.lastPersistedEquity);
+    const pct = this.lastPersistedEquity > 0 ? (delta / this.lastPersistedEquity) * 100 : Infinity;
+    return elapsed >= EQUITY_PERSIST_INTERVAL_MS || delta >= EQUITY_PERSIST_MIN_DELTA || pct >= EQUITY_PERSIST_MIN_PCT;
+  }
+
+  recordEquity(equity: number, at = Date.now(), opts: { persist?: boolean } = {}): void {
     if (equity > this.equityHwm || this.equityHwm === 0) {
       this.equityHwm = equity;
     }
@@ -76,9 +90,10 @@ export class PerformanceEngine {
       : 0;
     this.drawdownPercent = Math.max(0, this.drawdownPercent);
     this.maxDrawdownPercent = Math.max(this.maxDrawdownPercent, this.drawdownPercent);
-    if (opts.persist !== false && this.store && Number.isFinite(equity)) {
-      // Sampled equity: throttle identical readings to bound file growth.
+    if (opts.persist !== false && this.store && Number.isFinite(equity) && this.shouldPersistEquity(equity, at)) {
       this.store.append({ type: 'portfolio.equity', payload: { equity, drawdownPercent: this.drawdownPercent } });
+      this.lastPersistedEquity = equity;
+      this.lastPersistedAt = at;
     }
   }
 

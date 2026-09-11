@@ -153,7 +153,7 @@ export class FillsLedger {
   hydrate(): void {
     this.replaying = true;
     try {
-      for (const event of this.store.readAll(Number.MAX_SAFE_INTEGER)) {
+      for (const event of this.store.readAll(50_000)) {
         if (event.type === 'fill.recorded') {
           this.fold(event.payload as Partial<FillRecord>);
         }

@@ -60,7 +60,7 @@ const useLearningData = (
   k: ReturnType<typeof getKernel>,
   outcomes: readonly { regime: string; pnl: number }[]
 ): LearningData => {
-  const findings = k.store.readAll(40)
+  const findings = k.store.tail(40)
     .filter((e) => e.type.startsWith('strategy.') || e.type.startsWith('trade.') || e.type.includes('pipeline'))
     .slice(-6).reverse()
     .map((e) => ({

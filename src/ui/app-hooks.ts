@@ -107,7 +107,7 @@ export const usePortfolio = (orchestrator: WatchOrchestrator): PortfolioState =>
   const [port, setPort] = useState<PortfolioState>(() => getKernel().portfolio.peek());
   useEffect(() => {
     orchestrator.start();
-    const poll = setInterval(() => { void getKernel().portfolio.refresh().then(setPort).catch(() => {}); }, 1000);
+    const poll = setInterval(() => { void getKernel().portfolio.refresh().then(setPort).catch(() => {}); }, 5000);
     return (): void => { clearInterval(poll); orchestrator.stop(); };
   }, [orchestrator]);
   return port;

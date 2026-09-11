@@ -38,6 +38,16 @@ const CRITICAL_TYPES = new Set([
   'position.closed',
 ]);
 
+const BUFFER_CAP = 5000;
+
+const parseLine = (line: string): KernelEvent | undefined => {
+  try {
+    return JSON.parse(line) as KernelEvent;
+  } catch {
+    return undefined;
+  }
+};
+
 export class EventStore {
   private readonly filePath: string;
   private readonly durable: boolean;
@@ -84,13 +94,62 @@ export class EventStore {
     }
   }
 
+  private trimBuffer(): void {
+    if (this.buffer.length > BUFFER_CAP) {
+      this.buffer.splice(0, this.buffer.length - BUFFER_CAP);
+    }
+  }
+
+  private push(full: KernelEvent): void {
+    this.buffer.push(full);
+    this.trimBuffer();
+  }
+
+  private parseTailLines(lines: string[], limit: number): KernelEvent[] {
+    return lines.slice(-limit).map(parseLine).filter((e): e is KernelEvent => e !== undefined);
+  }
+
+  private readChunkLines(start: number, chunkSize: number): string[] {
+    const buf = Buffer.alloc(chunkSize);
+    const fd = fs.openSync(this.filePath, 'r');
+    fs.readSync(fd, buf, 0, chunkSize, start);
+    fs.closeSync(fd);
+    let text = buf.toString('utf-8');
+    if (start > 0) {
+      const firstNl = text.indexOf('\n');
+      if (firstNl >= 0) text = text.slice(firstNl + 1);
+    }
+    return text.trim().split('\n').filter(Boolean);
+  }
+
+  /**
+   * Read the last N JSONL records without loading the full audit file.
+   * Critical for long-running TUI sessions where the log grows to 100k+ lines.
+   */
+  private readFileTail(limit: number): KernelEvent[] {
+    try {
+      if (!fs.existsSync(this.filePath)) return [];
+      const stat = fs.statSync(this.filePath);
+      if (stat.size === 0) return [];
+      let chunkSize = Math.min(stat.size, Math.max(65_536, limit * 512));
+      while (chunkSize <= stat.size) {
+        const lines = this.readChunkLines(stat.size - chunkSize, chunkSize);
+        if (lines.length >= limit || chunkSize >= stat.size) return this.parseTailLines(lines, limit);
+        chunkSize = Math.min(stat.size, chunkSize * 2);
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * Append a non-critical event. Disk failures degrade the store but
    * never break the trading loop (telemetry-style events only).
    */
   append(event: Omit<KernelEvent, 'at'>): KernelEvent {
     const full: KernelEvent = { at: Date.now(), ...event };
-    this.buffer.push(full);
+    this.push(full);
     this.write(full);
     return full;
   }
@@ -103,7 +162,7 @@ export class EventStore {
    */
   appendCritical(event: Omit<KernelEvent, 'at'>): KernelEvent {
     const full: KernelEvent = { at: Date.now(), ...event };
-    this.buffer.push(full);
+    this.push(full);
     const ok = this.write(full);
     if (!ok && this.durable) {
       throw new EventPersistenceError(full, this.lastWriteError);
@@ -117,16 +176,11 @@ export class EventStore {
   }
 
   tail(limit = 50): readonly KernelEvent[] {
-    return this.buffer.slice(-limit);
+    return this.readAll(limit);
   }
 
   readAll(limit = 500): readonly KernelEvent[] {
-    try {
-      if (!fs.existsSync(this.filePath)) return [];
-      const lines = fs.readFileSync(this.filePath, 'utf-8').trim().split('\n');
-      return lines.slice(-limit).map((l) => JSON.parse(l) as KernelEvent);
-    } catch {
-      return [];
-    }
+    if (!fs.existsSync(this.filePath)) return this.buffer.slice(-limit);
+    return this.readFileTail(limit);
   }
 }
