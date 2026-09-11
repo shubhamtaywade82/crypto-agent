@@ -5,7 +5,7 @@ import type { BrokerPosition } from '../infrastructure/broker/broker.js';
 import type { MonitoredMarket, ScanOpportunity } from './scan-opportunities.js';
 import type { PipelineSnapshots } from './pipeline-view.js';
 import type { TranscriptEntry } from './transcript.js';
-import type { useAgentChat } from './app-hooks.js';
+import type { useAgentChat, usePortfolio } from './app-hooks.js';
 import type { PromptHistory } from './history.js';
 import { OverviewView } from './views/OverviewView.js';
 import { AgentView } from './views/AgentView.js';
@@ -34,11 +34,14 @@ export interface WorkspaceRouterProps {
   readonly transcript: readonly TranscriptEntry[];
   readonly chat?: ReturnType<typeof useAgentChat>;
   readonly history?: PromptHistory;
+  readonly streamLive?: boolean;
+  readonly autoEnabled?: boolean;
+  readonly port?: ReturnType<typeof usePortfolio>;
 }
 
 const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
   switch (p.activeTab) {
-    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} />;
+    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} streamLive={p.streamLive} autoEnabled={p.autoEnabled} port={p.port} />;
     case 'agent': return <AgentView focusSymbol={p.focusSymbol} snapshots={p.pipelineSnapshots} transcript={p.transcript} selectedIndex={p.selectedIndex} chat={p.chat} history={p.history} />;
     case 'opps': return <OpportunitiesView selectedIndex={p.selectedIndex} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} />;
     case 'positions': return <PositionsView positions={p.positions} selectedIndex={p.selectedIndex} />;
@@ -48,7 +51,7 @@ const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
     case 'learning': return <LearningView />;
     case 'events': return <EventsView timeline={p.timeline} selectedIndex={p.selectedIndex} />;
     case 'system': return <SystemView />;
-    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} />;
+    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} streamLive={p.streamLive} autoEnabled={p.autoEnabled} port={p.port} />;
   }
 };
 

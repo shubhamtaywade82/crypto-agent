@@ -20,6 +20,8 @@ interface NavHandlers {
   readonly selectedIndex: number;
   readonly activeModal: ActiveModal | null;
   readonly isBusy: boolean;
+  readonly inputEmpty: boolean;
+  readonly setActiveTab: (tab: WorkspaceTab) => void;
   readonly setSelectedIndex: React.Dispatch<React.SetStateAction<number>>;
   readonly closeModal: () => void;
   readonly openModal: (m: ActiveModal) => void;
@@ -40,6 +42,10 @@ const handleNavInput = (input: string, key: Parameters<Parameters<typeof useInpu
     h.cycleTab(key.shift ? -1 : 1);
     return;
   }
+  if (h.inputEmpty && !key.ctrl && !key.meta) {
+    const tab = WORKSPACE_TABS.find((t) => t.key === input);
+    if (tab) { h.setActiveTab(tab.id); h.setSelectedIndex(0); return; }
+  }
   if (key.pageUp || (key.ctrl && (key.upArrow || input === 'k' || input === '\x0b'))) {
     h.setSelectedIndex((i) => Math.max(0, i - 1));
     return;
@@ -59,6 +65,7 @@ const handleNavInput = (input: string, key: Parameters<Parameters<typeof useInpu
 
 export const useTerminalNav = (opts: {
   readonly isBusy: boolean;
+  readonly inputEmpty?: boolean;
   readonly onTogglePause: () => void;
   readonly onKillSwitch: () => void;
   readonly onQuit: () => void;
@@ -79,8 +86,8 @@ export const useTerminalNav = (opts: {
   }, [activeTab]);
 
   useInput((input, key) => handleNavInput(input, key, {
-    activeTab, selectedIndex, activeModal, isBusy: opts.isBusy,
-    setSelectedIndex, closeModal, openModal, cycleTab,
+    activeTab, selectedIndex, activeModal, isBusy: opts.isBusy, inputEmpty: opts.inputEmpty ?? true,
+    setActiveTab, setSelectedIndex, closeModal, openModal, cycleTab,
     onTogglePause: opts.onTogglePause, onKillSwitch: opts.onKillSwitch, onQuit: opts.onQuit,
     onEnterInspect: opts.onEnterInspect,
   }));

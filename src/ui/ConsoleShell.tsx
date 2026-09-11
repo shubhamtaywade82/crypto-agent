@@ -3,7 +3,7 @@ import { Box, useStdout } from 'ink';
 import { ConsoleHeader } from './components/ConsoleHeader.js';
 import { WorkspaceRouter } from './workspace-router.js';
 import { ConsoleInput } from './components/ConsoleInput.js';
-import { ConsoleFooter } from './components/ConsoleFooter.js';
+import { ConsoleFooter, TabsBar } from './components/ConsoleFooter.js';
 import { useConsoleState, useConsoleSubmit } from './use-console-state.js';
 import { useTerminalNav } from './use-terminal-nav.js';
 import { usePromptHistoryNavigation } from './history.js';
@@ -48,6 +48,7 @@ const useConsoleNav = (
   const k = getKernel();
   const nav = useTerminalNav({
     isBusy: s.chat.isBusy,
+    inputEmpty: inputVal.length === 0,
     onTogglePause: () => s.setAuto((a) => ({ ...a, enabled: !a.enabled })),
     onKillSwitch: () => { k.killSwitch.halt('Console user emergency halt', 'operator'); },
     onQuit: exit,
@@ -107,7 +108,8 @@ const ConsoleWorkspaceView = (p: {
       closeModal={p.nav.closeModal} positions={p.positions} timeline={p.timeline} focusSymbol={p.s.focusSymbol}
       opportunities={p.s.opportunities} markets={p.s.markets} isScanning={p.s.chat.isBusy}
       pipelineSnapshots={p.s.pipelineSnapshots} transcript={p.s.transcript}
-      chat={p.s.chat} history={p.s.history}
+      chat={p.s.chat} history={p.s.history} streamLive={p.s.streamLive}
+      autoEnabled={p.s.auto.enabled} port={p.s.port}
     />
   </Box>
 );
@@ -121,7 +123,7 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
   const k = getKernel();
   const { timeline, circuit, agentState } = useConsoleMetrics(s, k);
   const { stdout } = useStdout();
-  const h = Math.max(8, (stdout.rows || process.stdout.rows || 24) - 6);
+  const h = Math.max(8, (stdout.rows || process.stdout.rows || 24) - 8);
 
   return (
     <Box flexDirection="column" paddingX={1} gap={0} height={stdout.rows || undefined} overflow="hidden">
@@ -130,6 +132,7 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
         executionOk={!k.killSwitch.halted} circuit={circuit} killSwitchHalted={k.killSwitch.halted}
         cycle={s.pipelineCycle} equity={s.port.equity} dailyPnl={s.port.dailyRealizedPnl}
       />
+      <TabsBar activeTab={nav.activeTab} />
       <ConsoleWorkspaceView nav={nav} s={s} positions={positions} timeline={timeline} height={h} />
       <ConsoleInput
         value={inputVal} busy={s.chat.isBusy} focused={!s.chat.isBusy}
