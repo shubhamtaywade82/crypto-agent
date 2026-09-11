@@ -33,6 +33,9 @@ const useActivityLog = (): {
   return { activity, pushActivity, setActivity };
 };
 
+const noopMany = (_e: readonly import('./transcript.js').TranscriptEntry[]): void => undefined;
+const noopOne = (_e: import('./transcript.js').TranscriptEntry): void => undefined;
+
 export const useShellState = (_exit: () => void): {
   readonly mode: 'ops' | 'chat';
   readonly setMode: React.Dispatch<React.SetStateAction<'ops' | 'chat'>>;
@@ -57,7 +60,7 @@ export const useShellState = (_exit: () => void): {
   const { activity, pushActivity, setActivity } = useActivityLog();
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
   const history = useMemo(() => new PromptHistory(), []);
-  const chat = useAgentChat(orchestrator, pushActivity);
+  const chat = useAgentChat(orchestrator, pushActivity, noopMany, noopOne);
   const streamLive = useStreamBoot();
   useAutoScan(auto.enabled, auto.interval, chat.runKernelScan, chat.isBusy);
   const port = usePortfolio(orchestrator);
@@ -79,8 +82,9 @@ export const useSubmitHandler = (
     if (!t) return;
     s.history.save(t); setInputVal('');
     if (!runCommand({
-      input: t, focusSymbol: s.focusSymbol, setFocusSymbol: s.setFocusSymbol, setMode: s.setMode,
-      setAuto: s.setAuto, chat: s.chat, pushActivity: s.pushActivity, setActivity: s.setActivity, exit,
+      input: t, focusSymbol: s.focusSymbol, setFocusSymbol: s.setFocusSymbol,
+      setAuto: s.setAuto, chat: s.chat, pushActivity: s.pushActivity,
+      pushTranscript: (): void => undefined, clearTranscript: (): void => s.setActivity([]), exit,
     })) {
       s.setMode('chat');
       void s.chat.runTurn(t);

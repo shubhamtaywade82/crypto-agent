@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Box, Text } from 'ink';
 import { WatcherPanel } from './WatcherPanel.js';
 import { KernelDashboard } from './KernelDashboard.js';
@@ -12,7 +12,8 @@ const DEFAULT_SYMBOLS = kernelWatchSymbols();
 
 export const AppShell = (p: { readonly exit: () => void }): React.JSX.Element => {
   const s = useShellState(p.exit);
-  const { inputVal, setInputVal, handleUp, handleDown } = usePromptHistoryNavigation(s.history);
+  const [inputVal, setInputVal] = useState('');
+  const { handleUp, handleDown } = usePromptHistoryNavigation(s.history, inputVal, setInputVal);
   const handleSubmit = useSubmitHandler(s, inputVal, setInputVal, p.exit);
   const div = <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>;
   return (

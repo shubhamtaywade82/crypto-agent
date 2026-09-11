@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 
 const MAX_HISTORY_ITEMS = 100;
 
@@ -66,22 +66,18 @@ export class PromptHistory {
   }
 }
 
-export interface PromptHistoryNavigation {
-  inputVal: string;
-  setInputVal: React.Dispatch<React.SetStateAction<string>>;
-  handleUp: () => void;
-  handleDown: () => void;
-}
-
-export const usePromptHistoryNavigation = (history: PromptHistory): PromptHistoryNavigation => {
-  const [inputVal, setInputVal] = useState('');
+export const usePromptHistoryNavigation = (
+  history: PromptHistory,
+  inputVal: string,
+  setInputVal: (v: string) => void
+): { readonly handleUp: () => void; readonly handleDown: () => void } => {
   const handleUp = useCallback((): void => {
     const prev = history.navigateUp(inputVal);
     if (prev !== undefined) setInputVal(prev);
-  }, [history, inputVal]);
+  }, [history, inputVal, setInputVal]);
   const handleDown = useCallback((): void => {
     const next = history.navigateDown();
     if (next !== undefined) setInputVal(next);
-  }, [history]);
-  return { inputVal, setInputVal, handleUp, handleDown };
+  }, [history, setInputVal]);
+  return { handleUp, handleDown };
 };

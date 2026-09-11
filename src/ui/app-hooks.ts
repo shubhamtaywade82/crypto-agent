@@ -4,6 +4,7 @@ import type { WatchOrchestrator } from '../engine/orchestrator.js';
 import { getKernel, type TradingKernel } from '../kernel.js';
 import type { PortfolioState } from '../domain/portfolio/portfolio-state.js';
 import { createLiveHooks, type AgentStep, type ChatMessage } from './chat-shared.js';
+import { pipelineToEntries, type TranscriptEntry } from './transcript.js';
 
 const DEFAULT_SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT').split(',').map((s) => s.trim().toUpperCase());
 
@@ -14,25 +15,29 @@ export const formatTrace = (symbol: string, trace: Awaited<ReturnType<TradingKer
   return `${symbol} ${trace.status} ${trace.regime} setups=[${setups}]${flow}`;
 };
 
-const usePipelineRunner = (
-  onActivity: (text: string) => void,
-  appendMsg: (m: ChatMessage) => void,
-  setBusy: (b: boolean) => void,
-  setStatus: (s: string) => void
-): {
+interface PipelineRunnerOpts {
+  readonly onActivity: (text: string) => void;
+  readonly appendMany: (entries: readonly TranscriptEntry[]) => void;
+  readonly appendMsg: (m: ChatMessage) => void;
+  readonly setBusy: (b: boolean) => void;
+  readonly setStatus: (s: string) => void;
+}
+
+const usePipelineRunner = (opts: PipelineRunnerOpts): {
   runPipelineTrace: (symbol: string) => Promise<void>;
   runKernelScan: (symbols?: readonly string[]) => Promise<void>;
 } => {
+  const { onActivity, appendMany, appendMsg, setBusy, setStatus } = opts;
   const runPipelineTrace = useCallback(async (symbol: string): Promise<void> => {
     setBusy(true); setStatus(`Pipeline ${symbol}...`);
     try {
       const trace = await getKernel().runPipeline(symbol);
-      onActivity(formatTrace(symbol, trace));
+      appendMany(pipelineToEntries(symbol, trace));
       appendMsg({ id: String(Date.now()), role: 'system', title: `🛡️ ${symbol}`, content: formatTrace(symbol, trace) });
     } catch (err) {
       onActivity(`ERR ${symbol}: ${err instanceof Error ? err.message : String(err)}`);
     } finally { setBusy(false); setStatus('Idle'); }
-  }, [appendMsg, onActivity, setBusy, setStatus]);
+  }, [appendMany, appendMsg, onActivity, setBusy, setStatus]);
 
   const runKernelScan = useCallback(async (symbols?: readonly string[]): Promise<void> => {
     for (const sym of (symbols?.length ? symbols : DEFAULT_SYMBOLS)) await runPipelineTrace(sym);
@@ -43,10 +48,12 @@ const usePipelineRunner = (
 
 export const useAgentChat = (
   orchestrator: WatchOrchestrator,
-  onActivity: (text: string) => void
+  onActivity: (text: string) => void,
+  appendMany: (entries: readonly TranscriptEntry[]) => void,
+  _pushTranscript: (e: TranscriptEntry) => void
 ): {
   messages: ChatMessage[]; isBusy: boolean; status: string; steps: AgentStep[]; response: string;
-  runTurn: (prompt: string) => Promise<void>; runPipelineTrace: (sym: string) => Promise<void>;
+  runTurn: (prompt: string) => Promise<string>; runPipelineTrace: (sym: string) => Promise<void>;
   runKernelScan: (syms?: readonly string[]) => Promise<void>; clearMessages: () => void; addSystemNote: (msg: string) => void;
 } => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -55,9 +62,9 @@ export const useAgentChat = (
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [response, setResponse] = useState('');
   const appendMsg = useCallback((m: ChatMessage): void => setMessages((p) => [...p, m].slice(-15)), []);
-  const { runPipelineTrace, runKernelScan } = usePipelineRunner(onActivity, appendMsg, setIsBusy, setStatus);
+  const { runPipelineTrace, runKernelScan } = usePipelineRunner({ onActivity, appendMany, appendMsg, setBusy: setIsBusy, setStatus });
 
-  const runTurn = useCallback(async (prompt: string): Promise<void> => {
+  const runTurn = useCallback(async (prompt: string): Promise<string> => {
     const collector = { steps: [] as AgentStep[] };
     setIsBusy(true); setStatus('ReAct...'); setSteps([]); setResponse('');
     appendMsg({ id: String(Date.now()), role: 'user', content: prompt });
@@ -66,6 +73,7 @@ export const useAgentChat = (
     });
     appendMsg({ id: String(Date.now()), role: 'agent', content: answer, steps: [...collector.steps] });
     setSteps([]); setResponse(''); setIsBusy(false); setStatus('Idle');
+    return answer;
   }, [orchestrator, appendMsg]);
 
   return {

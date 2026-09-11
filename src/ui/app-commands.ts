@@ -1,29 +1,28 @@
 import type React from 'react';
-import type { ActivityEntry } from './KernelDashboard.js';
 import { getKernel } from '../kernel.js';
 import { ensureSymbolTracked } from '../engines/market-hydrate.js';
+import { systemEntry, type TranscriptEntry } from './transcript.js';
 
 export interface CommandCtx {
   readonly input: string;
   readonly focusSymbol: string;
   readonly setFocusSymbol: (s: string) => void;
-  readonly setMode: (m: 'ops' | 'chat') => void;
   readonly setAuto: React.Dispatch<React.SetStateAction<{ enabled: boolean; interval: number }>>;
   readonly chat: {
-    runTurn: (p: string) => Promise<void>;
+    runTurn: (p: string) => Promise<string>;
     runPipelineTrace: (s: string) => Promise<void>;
     runKernelScan: (s?: readonly string[]) => Promise<void>;
     clearMessages: () => void;
     addSystemNote: (m: string) => void;
   };
   readonly pushActivity: (t: string) => void;
-  readonly setActivity: React.Dispatch<React.SetStateAction<ActivityEntry[]>>;
+  readonly pushTranscript: (e: TranscriptEntry) => void;
+  readonly clearTranscript: () => void;
   readonly exit: () => void;
 }
 
 const applyFocus = (ctx: CommandCtx, sym: string): void => {
   ctx.setFocusSymbol(sym);
-  ctx.setMode('ops');
   void ensureSymbolTracked(sym).then((ok) => {
     ctx.pushActivity(ok ? `Focus → ${sym} (depth loaded)` : `Focus → ${sym} (depth pending)`);
   });
@@ -56,11 +55,12 @@ export const runCommand = (ctx: CommandCtx): boolean => {
   const t = ctx.input.trim();
   if (!t) return true;
   if (t === 'exit' || t === 'quit') { ctx.exit(); return true; }
-  if (t === '/clear') { ctx.chat.clearMessages(); ctx.setActivity([]); return true; }
-  if (t === '/chat') { ctx.setMode('chat'); return true; }
-  if (t === '/ops' || t === '/dash') { ctx.setMode('ops'); return true; }
+  if (t === '/clear') { ctx.chat.clearMessages(); ctx.clearTranscript(); return true; }
   if (t === '/help') {
-    ctx.chat.addSystemNote('`/focus SYM` `/scan` `/pipeline SYM` `/chat` `/ops` `/auto on|off` `/halt` `/resume`');
+    ctx.pushTranscript(systemEntry('Commands', [
+      '/focus SYM  /scan  /pipeline SYM  /halt  /resume  /auto on|off  /clear',
+      'Ask naturally: "why was BTC rejected?" "show positions" "trace last decision"',
+    ]));
     return true;
   }
   const focusArg = t.startsWith('/focus ') ? t.slice(7) : t.startsWith('/sym ') ? t.slice(5) : '';

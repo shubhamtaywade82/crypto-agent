@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from 'ink';
-import { AppShell } from './AppShell.js';
+import { ConsoleShell } from './ConsoleShell.js';
 
 export {
   renderMarkdown, formatToolArgs, formatToolResult, formatThoughtPreview,
@@ -8,5 +8,6 @@ export {
 
 export const App = (): React.JSX.Element => {
   const { exit } = useApp();
-  return <AppShell exit={exit} />;
+  return <ConsoleShell exit={exit} />;
 };
+
