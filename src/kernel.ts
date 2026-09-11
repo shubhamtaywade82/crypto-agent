@@ -1,9 +1,8 @@
 import { CoinDCXClient } from '@nemesis-oss/coindcx-sdk';
-import type { OllamaClient } from '@nemesis-oss/ollama-sdk';
 import type { IExecutionBroker } from './infrastructure/broker/broker.js';
 import { BinanceMarketDataProvider } from './infrastructure/binance/market-data-provider.js';
 import { buildCoinDCXStack } from './kernel-venue.js';
-import { buildSpecFor, buildPortfolio, buildStrategyGate } from './kernel-builders.js';
+import { buildSpecFor, buildPortfolio, buildPipelineDeps } from './kernel-builders.js';
 import { SymbolRouter } from './infrastructure/coindcx/symbol-router.js';
 import { PaperExecutionBroker } from './infrastructure/paper/paper-broker-adapter.js';
 import { EventStore } from './infrastructure/events/event-store.js';
@@ -21,13 +20,8 @@ import { SymbolLanes } from './engines/event-bus.js';
 import { KillSwitch } from './security/kill-switch.js';
 import { TradeLedger } from './learning/trade-ledger.js';
 import { StrategyRegistry } from './learning/strategy-registry.js';
-import { buildExecutor } from './kernel-executor.js';
 import { buildStreams, startStreams, stopStreams, type KernelStreams } from './kernel-streams.js';
-import { runTradingPipeline, type PipelineTrace, type PipelineDeps, type StrategyRequest } from './engines/pipeline.js';
-import { analyzeMarket } from './agents/analyst-agent.js';
-import { strategize } from './agents/strategist-agent.js';
-import { challengeProposal } from './agents/risk-challenger.js';
-import type { MarketAnalysis, StrategyOutcome, ChallengerVerdict } from './agents/schemas.js';
+import { runTradingPipeline, type PipelineTrace } from './engines/pipeline.js';
 import type { TradeProposal, ValidationResult } from './domain/orders/trade-proposal.js';
 import type { SizingResult } from './engines/position-sizer.js';
 import type { RiskDecision } from './domain/risk/risk-decision.js';
@@ -36,7 +30,7 @@ import { assessProposal } from './engines/pipeline.js';
 import type { MarketState } from './domain/market/types.js';
 import { MarketStateStore } from './engines/market-state-store.js';
 import { PortfolioStateStore } from './engines/portfolio-state-store.js';
-import { binanceClient, defaultModel, ollamaClient } from './config.js';
+import { binanceClient, ollamaClient } from './config.js';
 
 export type ExecutionVenue = 'paper' | 'coindcx';
 
@@ -149,45 +143,6 @@ interface KernelParts {
     readonly reasons: readonly string[];
   }>;
 }
-
-const buildAnalyze = (ollama: OllamaClient) => (state: MarketState): Promise<MarketAnalysis> =>
-  analyzeMarket(ollama, defaultModel, state);
-
-const buildStrategize = (ollama: OllamaClient) => (request: StrategyRequest): Promise<StrategyOutcome> =>
-  strategize(ollama, defaultModel, request);
-
-const buildChallenge = (ollama: OllamaClient) =>
-  (proposal: TradeProposal, state: MarketState): Promise<ChallengerVerdict> =>
-    challengeProposal(ollama, defaultModel, proposal, state);
-
-const buildPipelineDeps = (
-  parts: KernelParts,
-  ollama: OllamaClient,
-  router: SymbolRouter | undefined,
-  broker: IExecutionBroker
-): PipelineDeps => ({
-  provider: parts.provider,
-  limits: parts.limits,
-  portfolio: parts.portfolio,
-  execution: parts.execution,
-  store: parts.store,
-  challengesEnabled: parts.challengesEnabled,
-  specFor: parts.specFor,
-  reservations: parts.reservations,
-  isTradingAllowed: (): { readonly allowed: boolean; readonly reason?: string } =>
-    parts.killSwitch.halted
-      ? { allowed: false, reason: `kill switch HALTED: ${parts.killSwitch.currentReason}` }
-      : { allowed: true },
-  ledger: parts.ledger,
-  marketStore: parts.marketStore,
-  marketMaxStaleMs: Number(process.env.MARKET_MAX_STALE_MS ?? 45_000),
-  crossVenueGate: parts.crossVenueGate,
-  strategyGate: buildStrategyGate(parts.strategies),
-  analyze: buildAnalyze(ollama),
-  strategize: buildStrategize(ollama),
-  challenge: buildChallenge(ollama),
-  execute: buildExecutor(broker, router, parts.execution),
-});
 
 interface KernelContext {
   readonly venue: ExecutionVenue;

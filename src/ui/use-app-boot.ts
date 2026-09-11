@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getKernel } from '../kernel.js';
+import { bootEventCouncil } from '../engines/event-council.js';
 import { hydrateWatchMicro } from '../engines/market-hydrate.js';
 import { kernelWatchSymbols } from '../kernel-streams.js';
 
@@ -11,7 +12,7 @@ export const useStreamBoot = (): boolean => {
   useEffect(() => {
     const kernel = getKernel();
     void kernel.startStreams()
-      .then(() => hydrateWatchMicro())
+      .then(() => { bootEventCouncil(kernel); return hydrateWatchMicro(); })
       .then(() => setLive(hasMicroData()))
       .catch(() => setLive(false));
     const poll = setInterval(() => { if (hasMicroData()) setLive(true); }, 1000);

@@ -12,12 +12,13 @@ import { runJsonRole } from './role-runner.js';
 export const analyzeMarket = async (
   ollama: OllamaClient,
   model: string,
-  state: MarketState
+  state: MarketState,
+  evidence?: string
 ): Promise<MarketAnalysis> =>
   runJsonRole({
     ollama,
     model,
     system: ANALYST_SYSTEM,
-    user: analystPrompt(state),
+    user: analystPrompt(state, evidence),
     schema: MarketAnalysisSchema,
   });

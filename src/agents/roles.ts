@@ -30,8 +30,11 @@ export const ANALYST_SYSTEM =
   `Schema: {"symbol":string,"bias":"BULLISH"|"BEARISH"|"NEUTRAL","summary":string,` +
   `"keyLevels":{"support":number,"resistance":number},"catalysts":string[],"risks":string[]}. ${JSON_ONLY}`;
 
-export const analystPrompt = (state: MarketState): string =>
-  `Analyze this market snapshot for ${state.symbol}:\n${stateBlock(state)}`;
+export const analystPrompt = (state: MarketState, evidence?: string): string => {
+  const base = `Analyze this market snapshot for ${state.symbol}:\n${stateBlock(state)}`;
+  if (!evidence) return base;
+  return `${base}\n\nEMPIRICAL EVIDENCE (historical reach rates vs matched controls):\n${evidence}`;
+};
 
 export const STRATEGIST_SYSTEM =
   'You are a crypto trade strategist. You receive a market snapshot, an analyst read, and ' +
@@ -50,6 +53,7 @@ export interface StrategistContext {
   readonly setups: readonly SetupCandidate[];
   readonly portfolio: PortfolioState;
   readonly lessons: readonly string[];
+  readonly evidence?: string;
 }
 
 export const strategistPrompt = (ctx: StrategistContext): string => {
@@ -61,14 +65,16 @@ export const strategistPrompt = (ctx: StrategistContext): string => {
     ).join('\n')
     : 'none';
   const lessons = ctx.lessons.length > 0 ? ctx.lessons.join(' | ') : 'none';
+  const evidence = ctx.evidence ? `EMPIRICAL EVIDENCE:\n${ctx.evidence}` : '';
   return [
     `PORTFOLIO: equity=${ctx.portfolio.equity.toFixed(2)} openPositions=${ctx.portfolio.openPositions} ` +
     `dailyLoss%=${ctx.portfolio.dailyLossPercent.toFixed(2)} lossStreak=${ctx.portfolio.lossStreak}`,
     `ANALYST: ${ctx.analysis.bias} — ${ctx.analysis.summary}`,
     `CANDIDATE SETUPS:\n${setups}`,
+    evidence,
     `LESSONS FROM PAST TRADES: ${lessons}`,
     'Choose one candidate by id, or WAIT. Output the JSON object.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 };
 
 export const CHALLENGER_SYSTEM =

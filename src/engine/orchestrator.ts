@@ -1,6 +1,7 @@
 import { PriceWatcher } from './watcher.js';
 import { TradeJournal } from './journal.js';
 import { runTradingAgent } from '../agent.js';
+import { dispatchCouncil } from '../engines/event-council.js';
 import { sendTelegramAlert, sendTelegramStatus } from '../notifications/telegram.js';
 import { SymbolLanes } from '../engines/event-bus.js';
 import type { MarketTicker, WatchCondition, WatchTriggerEvent, WatcherStatus } from '../types.js';
@@ -93,11 +94,16 @@ export class WatchOrchestrator {
         if (active) {
           prompt += `\n[System Alert: Active ${active.direction} trade exists for ${event.condition.symbol} (Entry: ${active.entryPrice}, SL: ${active.stopLoss}, TP: ${active.takeProfit}). If this hit TP/SL, execute record_trade_outcome with post-mortem critique and lessons learned.]`;
         }
-        const analysis = await (this.agentRunner
-          ? this.agentRunner(prompt, event)
-          : runTradingAgent(prompt, { orchestrator: this }));
-        await sendTelegramAlert(event, analysis);
-        for (const listener of this.listeners) listener(event, analysis);
+        if (process.env.EVENT_COUNCIL_REACT === 'true') {
+          const analysis = await (this.agentRunner
+            ? this.agentRunner(prompt, event)
+            : runTradingAgent(prompt, { orchestrator: this }));
+          await sendTelegramAlert(event, analysis);
+          for (const listener of this.listeners) listener(event, analysis);
+          return;
+        }
+        await dispatchCouncil({ type: 'PRICE_WATCH', event });
+        for (const listener of this.listeners) listener(event, 'council');
       } catch (err) {
         await sendTelegramStatus(
           `⚠️ Re-analysis failed for ${event.condition.symbol}: ${err instanceof Error ? err.message : String(err)}`

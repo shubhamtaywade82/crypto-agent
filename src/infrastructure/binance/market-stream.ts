@@ -26,6 +26,8 @@ export interface WsHandle {
 
 export type WsFactory = (url: string, handlers: WsHandlers) => WsHandle;
 
+export type CandleCloseHandler = (symbol: string, timeframe: Timeframe, at: number) => void;
+
 export interface MarketStreamOptions {
   readonly store: MarketStateStore;
   readonly provider: IMarketDataProvider;
@@ -80,6 +82,7 @@ export class BinanceMarketStream {
   private reconnectTimer?: NodeJS.Timeout;
   private stopped = true;
   private lastEventAt?: number;
+  private candleCloseHandler?: CandleCloseHandler;
 
   constructor(opts: MarketStreamOptions) {
     this.store = opts.store;
@@ -96,6 +99,10 @@ export class BinanceMarketStream {
 
   get state(): StreamState {
     return this.stateValue;
+  }
+
+  onCandleClose(handler: CandleCloseHandler): void {
+    this.candleCloseHandler = handler;
   }
 
   status(): {
@@ -126,26 +133,16 @@ export class BinanceMarketStream {
       await this.backfill(s);
     }
     this.stopped = false;
-    this.reconnectMultiplex();
+    if (this.socket) { this.socket.close(); this.socket = undefined; }
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.connect();
   }
 
   /** Track + REST-seed a symbol; refresh micro if already on the watchlist. */
   async ensure(symbol: string): Promise<void> {
     const sym = symbol.toUpperCase();
-    if (!this.symbols.has(sym)) {
-      await this.subscribe([sym]);
-      return;
-    }
+    if (!this.symbols.has(sym)) { await this.subscribe([sym]); return; }
     await this.backfillMicro(sym);
-  }
-
-  private reconnectMultiplex(): void {
-    if (this.socket) {
-      this.socket.close();
-      this.socket = undefined;
-    }
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.connect();
   }
 
   /** Graceful shutdown: no further reconnects after close. */
@@ -237,8 +234,6 @@ export class BinanceMarketStream {
       return;
     }
     const name = parsed.stream ?? '';
-    // Book-ticker payloads are structurally parsed (the SDK validator
-    // covers kline/markPrice/miniTicker only).
     if (name.includes('@bookTicker')) {
       if (!this.applyBookTicker(parsed.data)) {
         this.log.debug('unparsable bookTicker payload ignored', { stream: name });
@@ -267,7 +262,9 @@ export class BinanceMarketStream {
     const at = this.now();
     if (name.includes('@kline')) {
       const k = payload as WsKlinePayload;
-      this.store.upsertKline({ symbol: k.s, timeframe: tfOf(k.k.i), candle: toCandle(k.k), at });
+      const tf = tfOf(k.k.i);
+      this.store.upsertKline({ symbol: k.s, timeframe: tf, candle: toCandle(k.k), at });
+      if (k.k.x) this.candleCloseHandler?.(k.s, tf, at);
       return;
     }
     if (name.includes('@markPrice')) {

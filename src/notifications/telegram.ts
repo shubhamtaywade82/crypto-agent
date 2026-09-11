@@ -12,7 +12,7 @@ const getConfig = (): TelegramConfig | null => {
   return { botToken, chatId };
 };
 
-const escapeHtml = (text: string): string =>
+export const escapeHtml = (text: string): string =>
   text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -71,6 +71,27 @@ export const sendTelegramAlert = async (
         text,
         parse_mode: 'HTML',
         disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+};
+
+/** Send arbitrary HTML to Telegram (council cards, status, etc.). */
+export const sendTelegramHtml = async (text: string, silent = false): Promise<boolean> => {
+  const config = getConfig();
+  if (!config) return false;
+  const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: config.chatId, text, parse_mode: 'HTML',
+        disable_web_page_preview: true, disable_notification: silent,
       }),
       signal: AbortSignal.timeout(10_000),
     });

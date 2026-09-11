@@ -21,27 +21,15 @@ export interface CommandCtx {
   readonly exit: () => void;
 }
 
-export const runCommand = (ctx: CommandCtx): boolean => {
-  const t = ctx.input.trim();
-  if (!t) return true;
-  if (t === 'exit' || t === 'quit') { ctx.exit(); return true; }
-  if (t === '/clear') { ctx.chat.clearMessages(); ctx.setActivity([]); return true; }
-  if (t === '/chat') { ctx.setMode('chat'); return true; }
-  if (t === '/ops' || t === '/dash') { ctx.setMode('ops'); return true; }
-  if (t === '/help') {
-    ctx.chat.addSystemNote('`/focus SYM` `/scan` `/pipeline SYM` `/chat` `/ops` `/auto on|off` `/halt` `/resume`');
-    return true;
-  }
-  const focusArg = t.startsWith('/focus ') ? t.slice(7) : t.startsWith('/sym ') ? t.slice(5) : '';
-  if (focusArg) {
-    const sym = focusArg.trim().toUpperCase();
-    ctx.setFocusSymbol(sym);
-    ctx.setMode('ops');
-    void ensureSymbolTracked(sym).then((ok) => {
-      ctx.pushActivity(ok ? `Focus → ${sym} (depth loaded)` : `Focus → ${sym} (depth pending)`);
-    });
-    return true;
-  }
+const applyFocus = (ctx: CommandCtx, sym: string): void => {
+  ctx.setFocusSymbol(sym);
+  ctx.setMode('ops');
+  void ensureSymbolTracked(sym).then((ok) => {
+    ctx.pushActivity(ok ? `Focus → ${sym} (depth loaded)` : `Focus → ${sym} (depth pending)`);
+  });
+};
+
+const runTradingCmd = (ctx: CommandCtx, t: string): boolean => {
   if (t.startsWith('/halt') || t.startsWith('/kill')) {
     getKernel().killSwitch.halt(t.slice(5).trim() || 'operator halt', 'operator');
     ctx.pushActivity('Kill switch ENGAGED'); return true;
@@ -62,4 +50,20 @@ export const runCommand = (ctx: CommandCtx): boolean => {
   if (pSym) { void ctx.chat.runPipelineTrace(pSym); return true; }
   if (t === '/scan') { void ctx.chat.runKernelScan(); return true; }
   return false;
+};
+
+export const runCommand = (ctx: CommandCtx): boolean => {
+  const t = ctx.input.trim();
+  if (!t) return true;
+  if (t === 'exit' || t === 'quit') { ctx.exit(); return true; }
+  if (t === '/clear') { ctx.chat.clearMessages(); ctx.setActivity([]); return true; }
+  if (t === '/chat') { ctx.setMode('chat'); return true; }
+  if (t === '/ops' || t === '/dash') { ctx.setMode('ops'); return true; }
+  if (t === '/help') {
+    ctx.chat.addSystemNote('`/focus SYM` `/scan` `/pipeline SYM` `/chat` `/ops` `/auto on|off` `/halt` `/resume`');
+    return true;
+  }
+  const focusArg = t.startsWith('/focus ') ? t.slice(7) : t.startsWith('/sym ') ? t.slice(5) : '';
+  if (focusArg) { applyFocus(ctx, focusArg.trim().toUpperCase()); return true; }
+  return runTradingCmd(ctx, t);
 };

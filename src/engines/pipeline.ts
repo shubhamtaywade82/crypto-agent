@@ -33,6 +33,7 @@ export interface StrategyRequest {
   readonly setups: readonly SetupCandidate[];
   readonly portfolio: PortfolioState;
   readonly lessons: readonly string[];
+  readonly evidence?: string;
 }
 
 export interface PipelineDeps {
@@ -85,7 +86,7 @@ export interface PipelineDeps {
   readonly strategyGate?: (
     strategyId: string, setupType: string, regime: string
   ) => { readonly allowed: boolean; readonly reason?: string };
-  readonly analyze: (state: MarketState) => Promise<MarketAnalysis>;
+  readonly analyze: (state: MarketState, evidence?: string) => Promise<MarketAnalysis>;
   readonly strategize: (request: StrategyRequest) => Promise<StrategyOutcome>;
   readonly challenge?: (
     proposal: TradeProposal,
@@ -98,6 +99,7 @@ export interface PipelineDeps {
     reservationId?: string
   ) => Promise<TrackedOrder>;
   readonly getLessons?: () => readonly string[];
+  readonly getEvidence?: (symbol: string) => Promise<string | undefined>;
 }
 
 export type PipelineStatus =
@@ -212,10 +214,11 @@ export const runTradingPipeline = async (
     };
     if (setups.length === 0) return base;
 
-    const analysis = await deps.analyze(state);
+    const evidence = deps.getEvidence ? await deps.getEvidence(symbol) : undefined;
+    const analysis = await deps.analyze(state, evidence);
     const outcome = await deps.strategize({
       state, analysis, setups,
-      portfolio, lessons: deps.getLessons?.() ?? [],
+      portfolio, lessons: deps.getLessons?.() ?? [], evidence,
     });
     const withOutcome: PipelineTrace & { outcome: StrategyOutcome } = { ...base, analysis, outcome };
 

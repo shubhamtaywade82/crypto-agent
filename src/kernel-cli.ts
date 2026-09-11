@@ -1,3 +1,4 @@
+import { bootEventCouncil } from './engines/event-council.js';
 import { getKernel } from './kernel.js';
 import { startInteractiveRepl } from './main.js';
 
@@ -43,6 +44,7 @@ const runHeadless = async (): Promise<void> => {
   }
   kernel.reconciler.start();
   await kernel.startStreams();
+  bootEventCouncil(kernel);
   kernel.log.info('kernel loop starting', { symbols: SYMBOLS, intervalMs: INTERVAL_MS, venue: kernel.venue });
   await runOnce();
   const timer = setInterval(() => { void runOnce(); }, INTERVAL_MS);

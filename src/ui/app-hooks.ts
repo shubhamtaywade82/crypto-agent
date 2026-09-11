@@ -68,11 +68,6 @@ export const useAgentChat = (
     setSteps([]); setResponse(''); setIsBusy(false); setStatus('Idle');
   }, [orchestrator, appendMsg]);
 
-  useEffect(() => {
-    orchestrator.setAgentRunner(async (_p, ev) => { await runPipelineTrace(ev.condition.symbol); return ''; });
-    return (): void => orchestrator.setAgentRunner(undefined);
-  }, [orchestrator, runPipelineTrace]);
-
   return {
     messages, isBusy, status, steps, response, runTurn, runPipelineTrace, runKernelScan,
     clearMessages: (): void => setMessages([]),

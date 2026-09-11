@@ -90,11 +90,9 @@ export const KernelDashboard = ({
   const [, setTick] = useState(0);
   useEffect(() => {
     void ensureSymbolTracked(focusSymbol);
-  }, [focusSymbol]);
-  useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 500);
     return (): void => clearInterval(t);
-  }, []);
+  }, [focusSymbol]);
   const focus = getKernel().marketStore.snapshot(focusSymbol);
   const micro = focus?.microstructure;
 
