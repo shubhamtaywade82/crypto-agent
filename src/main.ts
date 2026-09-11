@@ -99,7 +99,12 @@ export const startInteractiveRepl = async (): Promise<void> => {
 };
 
 const main = async (): Promise<void> => {
-  const args = process.argv.slice(2).join(' ').trim();
+  if (process.argv.includes('--headless') || process.argv.includes('--daemon')) {
+    const { runHeadless } = await import('./kernel-cli.js');
+    await runHeadless();
+    return;
+  }
+  const args = process.argv.slice(2).filter((a) => !a.startsWith('--')).join(' ').trim();
   if (args) {
     await executeWithStreaming(args);
     return;

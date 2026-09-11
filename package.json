@@ -10,9 +10,10 @@
     "server": "tsx src/server.ts",
     "server:start": "node dist/server.js",
     "dev": "tsx src/main.ts",
+    "daemon": "tsx src/main.ts --headless",
     "mcp": "tsx src/mcp-server.ts",
-    "kernel": "tsx src/kernel-cli.ts",
-    "kernel:daemon": "tsx src/kernel-cli.ts --headless",
+    "kernel": "tsx src/main.ts",
+    "kernel:daemon": "tsx src/main.ts --headless",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"

@@ -48,7 +48,7 @@ const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
     case 'learning': return <LearningView />;
     case 'events': return <EventsView timeline={p.timeline} selectedIndex={p.selectedIndex} />;
     case 'system': return <SystemView />;
-    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} />;
+    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} />;
   }
 };
 

@@ -175,7 +175,7 @@ export class BinanceMarketStream {
         this.provider.getAggTrades(symbol, 50),
       ]);
       this.store.setDepth({ symbol, bids: depth.bids, asks: depth.asks, at });
-      for (const t of trades) this.store.pushTrade(symbol, t);
+      this.store.mergeTrades(symbol, trades);
     } catch (err) {
       this.log.warn('microstructure backfill failed', { symbol, err: String(err) });
     }

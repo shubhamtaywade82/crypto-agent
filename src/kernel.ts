@@ -92,6 +92,8 @@ interface KernelParts {
   readonly fills: FillsLedger;
   readonly streams: KernelStreams;
   readonly registerPendingSnapshot: (snapshot: TradeFeatureSnapshot) => void;
+  readonly clearPendingSnapshot: (decisionId: string) => void;
+  readonly commitPendingSnapshot: (decisionId: string) => void;
   readonly crossVenueGate?: (symbol: string) => Promise<{
     readonly tradable: boolean;
     readonly reasons: readonly string[];
@@ -184,11 +186,27 @@ const buildResyncAccount = (ctx: KernelContext) => async (): Promise<void> => {
   ctx.accountCache.syncSnapshot(positions, balances, Date.now());
 };
 
-const buildParts = (
-  ctx: KernelContext,
-  log: Logger,
-  registerPendingSnapshot: (snapshot: TradeFeatureSnapshot) => void
-): KernelParts => {
+interface SnapshotHooks {
+  readonly registerPendingSnapshot: (snapshot: TradeFeatureSnapshot) => void;
+  readonly clearPendingSnapshot: (decisionId: string) => void;
+  readonly commitPendingSnapshot: (decisionId: string) => void;
+}
+
+const buildSnapshotHooks = (
+  ledger: TradeLedger,
+  pending: Map<string, TradeFeatureSnapshot>
+): SnapshotHooks => ({
+  registerPendingSnapshot: (s) => pending.set(s.decisionId, s),
+  clearPendingSnapshot: (id) => pending.delete(id),
+  commitPendingSnapshot: (id): void => {
+    const snap = pending.get(id);
+    if (!snap) return;
+    ledger.recordOpened(snap);
+    pending.delete(id);
+  },
+});
+
+const buildParts = (ctx: KernelContext, log: Logger, hooks: SnapshotHooks): KernelParts => {
   const limits = loadRiskLimits();
   const provider = new BinanceMarketDataProvider(binanceClient);
   return {
@@ -204,7 +222,9 @@ const buildParts = (
     specFor: buildSpecFor(ctx),
     marketStore: ctx.marketStore,
     fills: ctx.fills,
-    registerPendingSnapshot,
+    registerPendingSnapshot: hooks.registerPendingSnapshot,
+    clearPendingSnapshot: hooks.clearPendingSnapshot,
+    commitPendingSnapshot: hooks.commitPendingSnapshot,
     streams: buildStreams({
       audit: ctx.store, provider, log, venue: ctx.venue,
       marketStore: ctx.marketStore, accountCache: ctx.accountCache,
@@ -242,7 +262,7 @@ export const createKernel = (venueOverride?: ExecutionVenue): TradingKernel => {
   const pendingSnapshots = new Map<string, TradeFeatureSnapshot>();
 
   const ctx = buildKernelContext(venue, store, log);
-  const parts = buildParts(ctx, log, (s) => pendingSnapshots.set(s.decisionId, s));
+  const parts = buildParts(ctx, log, buildSnapshotHooks(ctx.ledger, pendingSnapshots));
   installSafetyGates(parts, pendingSnapshots);
   const reconciler = new Reconciler(ctx.broker, parts.execution, parts.store, parts.reservations);
   const deps = buildPipelineDeps(parts, ollamaClient, ctx.router, ctx.broker);

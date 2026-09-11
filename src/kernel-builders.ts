@@ -27,6 +27,7 @@ import type { RiskReservationManager } from './engines/risk-reservations.js';
 import type { KillSwitch } from './security/kill-switch.js';
 import { buildExecutor } from './kernel-executor.js';
 import type { ExecutionVenue } from './kernel.js';
+import { TradeJournal } from './engine/journal.js';
 
 /**
  * Composition helpers shared by the kernel assembly (kept out of
@@ -107,6 +108,8 @@ export interface PipelineParts {
     readonly reasons: readonly string[];
   }>;
   readonly registerPendingSnapshot?: (snapshot: TradeFeatureSnapshot) => void;
+  readonly clearPendingSnapshot?: (decisionId: string) => void;
+  readonly commitPendingSnapshot?: (decisionId: string) => void;
 }
 
 const buildAnalyze = (ollama: OllamaClient) =>
@@ -152,5 +155,9 @@ export const buildPipelineDeps = (
     challengeProposal(ollama, defaultModel, p, s),
   execute: buildExecutor(broker, router, parts.execution),
   getEvidence: defaultEvidence(parts), evidenceGate: buildEvidenceGate(parts),
+  getLessons: (): readonly string[] =>
+    new TradeJournal().getRecentLessons(undefined, 8).map((l) => `[${l.symbol}] ${l.lesson}`),
   registerPendingSnapshot: parts.registerPendingSnapshot,
+  clearPendingSnapshot: parts.clearPendingSnapshot,
+  commitPendingSnapshot: parts.commitPendingSnapshot,
 });

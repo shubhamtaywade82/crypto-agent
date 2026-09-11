@@ -65,6 +65,10 @@ export interface PipelineDeps {
   readonly getLessons?: () => readonly string[];
   readonly getEvidence?: (symbol: string) => Promise<string | undefined>;
   readonly registerPendingSnapshot?: (snapshot: TradeFeatureSnapshot) => void;
+  /** Roll back a pending learning snapshot when submission fails before fill. */
+  readonly clearPendingSnapshot?: (decisionId: string) => void;
+  /** Safety net when fill hook did not consume the snapshot (e.g. sync fill race). */
+  readonly commitPendingSnapshot?: (decisionId: string) => void;
 }
 
 export type PipelineStatus =

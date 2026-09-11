@@ -1,21 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { buildTraderBrief } from '../src/ui/overview-brief.js';
 import type { PipelineTrace } from '../src/engines/pipeline.js';
-
-const mockKernel = (overrides: Record<string, unknown> = {}): void => {
-  vi.doMock('../src/kernel.js', () => ({
-    getKernel: () => ({
-      killSwitch: { halted: false },
-      limits: { maxConcurrentPositions: 2, maxDailyLossPercent: 1, maxDrawdownPercent: 5, maxLossStreak: 3 },
-      portfolio: { peek: () => ({ dailyLossPercent: 0, drawdownPercent: 0, lossStreak: 0, openPositions: 0 }) },
-      marketStore: {
-        snapshot: () => ({ regime: 'TREND_UP', price: { last: 100 }, timeframes: {} }),
-        isFresh: () => true,
-      },
-      ...overrides,
-    }),
-  }));
-};
 
 describe('buildTraderBrief', () => {
   it('returns MONITOR when no pipeline trace exists', () => {

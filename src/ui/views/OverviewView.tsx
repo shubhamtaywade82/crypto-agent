@@ -5,8 +5,9 @@ import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import type { ActivityTimelineItem } from '../types.js';
 import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
 import { OpportunityTable } from '../components/OpportunityTable.js';
-import { DepthLadder, Tape } from '../KernelDashboard.js';
+import { DepthLadder } from '../KernelDashboard.js';
 import { LiveLtpTable, useLiveTick } from '../components/LiveLtpTable.js';
+import { LiveTape } from '../components/LiveTape.js';
 import { TranscriptStrip } from '../components/TranscriptStrip.js';
 import { TraderBriefPanel } from '../components/TraderBriefPanel.js';
 import type { TranscriptEntry } from '../transcript.js';
@@ -28,6 +29,7 @@ export interface OverviewViewProps {
 }
 
 const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => {
+  useLiveTick(200);
   const snap = getKernel().marketStore.snapshot(symbol);
   return (
     <Box flexDirection="row" marginTop={1}>
@@ -37,7 +39,8 @@ const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Elemen
       </Box>
       <Box width="50%" flexDirection="column">
         <Text bold color="yellow">Tape ({symbol})</Text>
-        <Tape trades={snap?.trades ?? []} />
+        <Text color="gray">WS aggTrade + REST refresh</Text>
+        <LiveTape symbol={symbol} />
       </Box>
     </Box>
   );
@@ -113,4 +116,5 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
     <PositionsSummary positions={p.positions} />
     {p.transcript ? <TranscriptStrip entries={p.transcript} limit={2} /> : null}
   </Box>
-);
+  );
+};

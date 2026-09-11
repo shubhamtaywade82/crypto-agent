@@ -195,15 +195,17 @@ const proceedToExecution = async (
   const challenge = await challengeStage(deps, proposal, risk, state);
 
   if (deps.execute) {
+    recordTradeOpened(deps, ctx);
     try {
       const order = await deps.execute(proposal, sizing, risk, reserved.reservationId);
-      recordTradeOpened(deps, ctx);
+      if (order.filledQuantity > 0) deps.commitPendingSnapshot?.(risk.decisionId);
       settleReservation(deps.reservations, reserved.reservationId, order.status);
       return {
         ...assessed, challenge, status: 'EXECUTED',
         order: { intentId: risk.decisionId, status: order.status, orderId: order.orderId },
       };
     } catch (err) {
+      deps.clearPendingSnapshot?.(risk.decisionId);
       const tracked = deps.execution?.get(risk.decisionId);
       if (!tracked || tracked.status !== 'UNKNOWN') {
         deps.reservations?.release(reserved.reservationId ?? '', 'RELEASED_EXECUTION_ERROR');

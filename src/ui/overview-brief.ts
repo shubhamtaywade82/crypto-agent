@@ -116,6 +116,62 @@ const pickAlternate = (
   return ranked[0] ?? null;
 };
 
+const buildEmptyBrief = (
+  sym: string,
+  opps: readonly ScanOpportunity[],
+  risk: { readonly ok: boolean; readonly note: string; readonly fresh: boolean }
+): TraderBrief => {
+  const market = opps.find((o) => o.symbol === sym);
+  return {
+    symbol: sym,
+    stance: 'MONITOR',
+    headline: `No pipeline run yet — /pipeline ${sym}`,
+    confidence: null,
+    setup: null,
+    regime: market?.regime ?? '—',
+    mtf: market?.mtf ?? '—',
+    thesis: null,
+    trigger: 'Run /pipeline or wait for EventCouncil scan',
+    invalidation: null,
+    levels: {},
+    riskOk: risk.ok,
+    riskNote: risk.note,
+    microNote: null,
+    pipelineAge: null,
+    dataFresh: risk.fresh,
+    alternate: pickAlternate(sym, opps),
+  };
+};
+
+const buildTraceBrief = (
+  sym: string,
+  trace: PipelineTrace,
+  opps: readonly ScanOpportunity[],
+  risk: { readonly ok: boolean; readonly block: string | null; readonly note: string; readonly fresh: boolean; readonly last: number }
+): TraderBrief => {
+  const { stance, headline } = stanceFromTrace(trace, risk.ok);
+  const setup = topSetup(trace);
+  return {
+    symbol: sym,
+    stance: risk.block ? 'AVOID' : stance,
+    headline: risk.block ?? headline,
+    confidence: trace.outcome?.confidence ?? setup?.confidence ?? null,
+    setup: setup?.type ?? null,
+    regime: trace.regime,
+    mtf: mtfTrendLine(trace.state),
+    thesis: trace.outcome?.thesis ?? setup?.thesis ?? trace.analysis?.summary ?? null,
+    trigger: triggerLine(trace, risk.last || setup?.entry || 0),
+    invalidation: trace.outcome?.invalidation ?? setup?.invalidation ?? null,
+    levels: levelsFrom(trace),
+    riskOk: risk.ok,
+    riskNote: risk.block ?? risk.note,
+    microNote: microConflict(trace),
+    pipelineAge: pipelineAge(trace.ranAt),
+    dataFresh: risk.fresh,
+    alternate: pickAlternate(sym, opps),
+  };
+};
+
 /** Synthesize a trader-facing decision card for the focus symbol. */
 export const buildTraderBrief = (
   focusSymbol: string,
@@ -130,52 +186,22 @@ export const buildTraderBrief = (
   const circuit = deriveCircuitState(port.dailyLossPercent, port.drawdownPercent, port.lossStreak, k.limits);
   const slots = k.limits.maxConcurrentPositions - port.openPositions;
   const block = riskBlocked(circuit, k.killSwitch.halted, slots);
-  const riskOk = block === null;
   const fresh = k.marketStore.isFresh(sym, 45_000);
 
   if (!trace) {
-    return {
-      symbol: sym,
-      stance: 'MONITOR',
-      headline: 'No pipeline run yet — /pipeline ' + sym,
-      confidence: null,
-      setup: null,
-      regime: snap?.regime ?? '—',
-      mtf: mtfTrendLine(snap),
-      thesis: null,
-      trigger: 'Run /pipeline or wait for EventCouncil scan',
-      invalidation: null,
-      levels: {},
-      riskOk,
-      riskNote: block ?? `Circuit ${circuit} · ${slots} slot(s) free`,
-      microNote: null,
-      pipelineAge: null,
-      dataFresh: fresh,
-      alternate: pickAlternate(sym, opportunities),
-    };
+    return buildEmptyBrief(sym, opportunities, {
+      ok: block === null,
+      note: block ?? `Circuit ${circuit} · ${slots} slot(s) free`,
+      fresh,
+    });
   }
 
-  const { stance, headline } = stanceFromTrace(trace, riskOk);
-  const setup = topSetup(trace);
-  const conf = trace.outcome?.confidence ?? setup?.confidence ?? null;
-
-  return {
-    symbol: sym,
-    stance: block ? 'AVOID' : stance,
-    headline: block ?? headline,
-    confidence: conf,
-    setup: setup?.type ?? null,
-    regime: trace.regime,
-    mtf: mtfTrendLine(trace.state),
-    thesis: trace.outcome?.thesis ?? setup?.thesis ?? trace.analysis?.summary ?? null,
-    trigger: triggerLine(trace, snap?.price.last ?? setup?.entry ?? 0),
-    invalidation: trace.outcome?.invalidation ?? setup?.invalidation ?? null,
-    levels: levelsFrom(trace),
-    riskOk,
-    riskNote: block ?? `Circuit ${circuit} · ${slots} slot(s) · ${trace.risk?.approved ? 'gate PASS' : 'gate pending'}`,
-    microNote: microConflict(trace),
-    pipelineAge: pipelineAge(trace.ranAt),
-    dataFresh: fresh,
-    alternate: pickAlternate(sym, opportunities),
-  };
+  const gatePass = trace.risk?.approved ? 'gate PASS' : 'gate pending';
+  return buildTraceBrief(sym, trace, opportunities, {
+    ok: block === null,
+    block,
+    note: `Circuit ${circuit} · ${slots} slot(s) · ${gatePass}`,
+    fresh,
+    last: snap?.last ?? snap?.mark ?? 0,
+  });
 };

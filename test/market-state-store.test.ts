@@ -102,7 +102,23 @@ describe('MarketStateStore — microstructure', () => {
     const snap = store.snapshot('BTCUSDT')!;
     expect(snap.bids).toHaveLength(1);
     expect(snap.trades).toHaveLength(2);
+    expect(snap.tradeSeq).toBe(2);
     expect(snap.microstructure?.imbalance).toBeGreaterThan(0);
+  });
+
+  it('mergeTrades dedupes and bumps tradeSeq', () => {
+    const store = new MarketStateStore();
+    store.mergeTrades('BTCUSDT', [
+      { price: 100, qty: 1, at: 1, buyerIsMaker: false },
+      { price: 101, qty: 2, at: 2, buyerIsMaker: true },
+    ]);
+    store.mergeTrades('BTCUSDT', [
+      { price: 100, qty: 1, at: 1, buyerIsMaker: false },
+      { price: 102, qty: 1, at: 3, buyerIsMaker: false },
+    ]);
+    const snap = store.snapshot('BTCUSDT')!;
+    expect(snap.trades).toHaveLength(3);
+    expect(snap.tradeSeq).toBe(2);
   });
 });
 

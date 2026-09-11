@@ -25,6 +25,8 @@ export interface SymbolSnapshot {
   readonly bids: readonly BookLevel[];
   readonly asks: readonly BookLevel[];
   readonly trades: readonly TradePrint[];
+  /** Bumps on every tape mutation — UI can subscribe without deep compare. */
+  readonly tradeSeq: number;
   readonly microstructure?: MicrostructureView;
   readonly updatedAt: number;
 }
@@ -93,6 +95,7 @@ interface SymbolBook {
   bids: BookLevel[];
   asks: BookLevel[];
   trades: TradePrint[];
+  tradeSeq: number;
   lastEventAt?: number;
 }
 
@@ -101,6 +104,7 @@ const emptyBook = (): SymbolBook => ({
   bids: [],
   asks: [],
   trades: [],
+  tradeSeq: 0,
 });
 
 const capCandles = (map: Map<number, Candle>, cap: number): Candle[] => {
@@ -185,7 +189,21 @@ export class MarketStateStore {
   pushTrade(symbol: string, trade: TradePrint): void {
     const b = this.book(symbol);
     b.trades = [...b.trades, trade].slice(-TRADE_CAP);
+    b.tradeSeq += 1;
     this.touch(b, trade.at);
+  }
+
+  /** REST recovery: merge deduped prints, keep chronological tail. */
+  mergeTrades(symbol: string, incoming: readonly TradePrint[]): void {
+    if (incoming.length === 0) return;
+    const b = this.book(symbol);
+    const byKey = new Map<string, TradePrint>();
+    for (const t of [...b.trades, ...incoming]) {
+      byKey.set(`${t.at}:${t.price}:${t.qty}`, t);
+    }
+    b.trades = [...byKey.values()].sort((a, c) => a.at - c.at).slice(-TRADE_CAP);
+    b.tradeSeq += 1;
+    this.touch(b, Date.now());
   }
 
   microstructureOf(symbol: string): MicrostructureView | undefined {
@@ -207,7 +225,7 @@ export class MarketStateStore {
       fundingRate: b.fundingRate, openInterest: b.openInterest,
       openInterestChange: b.openInterestChange,
       bestBid: b.bestBid, bestAsk: b.bestAsk, bestQuoteAt: b.bestQuoteAt,
-      bids: b.bids, asks: b.asks, trades: b.trades,
+      bids: b.bids, asks: b.asks, trades: b.trades, tradeSeq: b.tradeSeq,
       microstructure: this.microstructureOf(symbol),
       updatedAt: b.lastEventAt,
     };

@@ -4,7 +4,6 @@ if (!process.argv.includes('--headless') && !process.argv.includes('--daemon') &
 
 import { bootEventCouncil } from './engines/event-council.js';
 import { getKernel } from './kernel.js';
-import { startInteractiveRepl } from './main.js';
 
 const SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT')
   .split(',')
@@ -41,7 +40,7 @@ const runOnce = async (): Promise<void> => {
   );
 };
 
-const runHeadless = async (): Promise<void> => {
+export const runHeadless = async (): Promise<void> => {
   const kernel = getKernel();
   if (kernel.killSwitch.halted && kernel.venue === 'paper') {
     kernel.killSwitch.resume('paper daemon auto-armed', 'boot');
@@ -63,18 +62,4 @@ const runHeadless = async (): Promise<void> => {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 };
-
-const main = async (): Promise<void> => {
-  const headless = process.argv.includes('--headless') || process.argv.includes('--daemon') || !process.stdout.isTTY;
-  if (headless) {
-    await runHeadless();
-    return;
-  }
-  await startInteractiveRepl();
-};
-
-main().catch((err: unknown) => {
-  process.stderr.write(`kernel fatal: ${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
-});
 

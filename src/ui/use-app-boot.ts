@@ -11,12 +11,17 @@ export const useStreamBoot = (): boolean => {
   const [live, setLive] = useState(false);
   useEffect(() => {
     const kernel = getKernel();
+    kernel.reconciler.start();
     void kernel.startStreams()
       .then(() => { bootEventCouncil(kernel); return hydrateWatchMicro(); })
       .then(() => setLive(hasMicroData()))
       .catch(() => setLive(false));
     const poll = setInterval(() => { if (hasMicroData()) setLive(true); }, 1000);
-    return (): void => { clearInterval(poll); kernel.stopStreams(); };
+    return (): void => {
+      clearInterval(poll);
+      kernel.reconciler.stop();
+      kernel.stopStreams();
+    };
   }, []);
   return live;
 };

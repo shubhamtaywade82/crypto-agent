@@ -4,6 +4,7 @@ import { getKernel } from '../kernel.js';
 import type { BookLevel, TradePrint } from '../domain/market/microstructure.js';
 import type { SymbolSnapshot } from '../engines/market-state-store.js';
 import { ensureSymbolTracked } from '../engines/market-hydrate.js';
+import { LiveTape } from './components/LiveTape.js';
 
 export interface ActivityEntry {
   readonly id: string;
@@ -108,7 +109,7 @@ export const KernelDashboard = ({
         </Box>
         <Box width="50%" flexDirection="column">
           <Text bold color="yellow">Tape</Text>
-          <Tape trades={focus?.trades ?? []} />
+          <LiveTape symbol={focusSymbol} />
         </Box>
       </Box>
       {micro && <Text color="gray">Δ ${micro.tradeDelta.toFixed(0)} │ bid {micro.bidDepth.toFixed(1)} ask {micro.askDepth.toFixed(1)}</Text>}
