@@ -1,0 +1,59 @@
+import React from 'react';
+import { Box, Text } from 'ink';
+import type { TraderBrief, TraderStance } from '../overview-brief.js';
+
+const stanceColor = (s: TraderStance): string => {
+  if (s === 'LONG') return 'green';
+  if (s === 'SHORT') return 'red';
+  if (s === 'AVOID') return 'red';
+  if (s === 'WAIT') return 'yellow';
+  return 'cyan';
+};
+
+const LevelsRow = ({ levels }: { readonly levels: TraderBrief['levels'] }): React.JSX.Element | null => {
+  const parts: string[] = [];
+  if (levels.support !== undefined) parts.push(`S $${levels.support.toFixed(0)}`);
+  if (levels.resistance !== undefined) parts.push(`R $${levels.resistance.toFixed(0)}`);
+  if (levels.entry !== undefined) parts.push(`E $${levels.entry.toFixed(2)}`);
+  if (levels.stop !== undefined) parts.push(`SL $${levels.stop.toFixed(2)}`);
+  if (levels.target !== undefined) parts.push(`TP $${levels.target.toFixed(2)}`);
+  if (levels.rr !== undefined) parts.push(`RR ${levels.rr.toFixed(2)}`);
+  if (parts.length === 0) return null;
+  return <Text color="gray">  Levels: <Text color="white">{parts.join(' │ ')}</Text></Text>;
+};
+
+export const TraderBriefPanel = ({ brief }: { readonly brief: TraderBrief }): React.JSX.Element => {
+  const conf = brief.confidence !== null ? `${(brief.confidence * 100).toFixed(0)}%` : '—';
+  const fresh = brief.dataFresh ? 'LIVE' : 'STALE';
+  const freshColor = brief.dataFresh ? 'green' : 'red';
+
+  return (
+    <Box flexDirection="column" gap={0}>
+      <Box justifyContent="space-between">
+        <Text bold color="cyan">TRADER BRIEF — {brief.symbol}</Text>
+        <Text color="gray">MD:<Text color={freshColor}>{fresh}</Text> {brief.pipelineAge ? `· scan ${brief.pipelineAge}` : ''}</Text>
+      </Box>
+      <Text>
+        <Text bold color={stanceColor(brief.stance)}>{brief.stance}</Text>
+        <Text color="gray"> │ </Text>
+        <Text color="white">{brief.headline}</Text>
+      </Text>
+      <Text color="gray">
+        Regime <Text color="white">{brief.regime}</Text> │ MTF <Text color="white">{brief.mtf}</Text>
+        {brief.setup ? <> │ Setup <Text color="yellow">{brief.setup}</Text></> : null}
+        {' │ '}Conf <Text color="white">{conf}</Text>
+      </Text>
+      {brief.thesis ? <Text color="gray">  Thesis: <Text color="white">"{brief.thesis.slice(0, 120)}{brief.thesis.length > 120 ? '…' : ''}"</Text></Text> : null}
+      {brief.trigger ? <Text color="gray">  Trigger: <Text color="green">{brief.trigger}</Text></Text> : null}
+      {brief.invalidation ? <Text color="gray">  Invalidate: <Text color="red">{brief.invalidation}</Text></Text> : null}
+      <LevelsRow levels={brief.levels} />
+      <Text color="gray">  Risk: <Text color={brief.riskOk ? 'green' : 'red'}>{brief.riskNote}</Text></Text>
+      {brief.microNote ? <Text color="yellow">  ⚠ {brief.microNote}</Text> : null}
+      {brief.alternate ? (
+        <Text color="gray">
+          Alt watch: <Text color="cyan">{brief.alternate.symbol}</Text> {brief.alternate.direction} {brief.alternate.setup} ({brief.alternate.state}, conf {(brief.alternate.confidence * 100).toFixed(0)}%)
+        </Text>
+      ) : null}
+    </Box>
+  );
+};

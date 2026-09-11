@@ -12,6 +12,7 @@ import { getMiEvidenceCache, warmMiEvidence } from './mi-evidence-cache.js';
 import { sendCouncilTelegram } from '../notifications/council-telegram.js';
 import type { BinanceMarketStream } from '../infrastructure/binance/market-stream.js';
 import { kernelWatchSymbols } from '../kernel-streams.js';
+import { emitCouncilPipelineTrace } from './pipeline-trace-bus.js';
 
 export type { CouncilTrigger } from './council-types.js';
 
@@ -151,6 +152,7 @@ export class EventCouncil {
     if (!skipCooldown && !this.shouldFire(trigger)) return undefined;
     return this.kernel.lanes.enqueue(symbol, async () => {
       const trace = await this.kernel.runPipeline(symbol);
+      emitCouncilPipelineTrace({ symbol, trace, trigger });
       if (!skipCooldown && !alwaysNotify(trace.status) && !this.shouldFire(trigger)) return trace;
       this.markFired(trigger);
       const types = eventTypesForCouncil(trigger, trace.setups);

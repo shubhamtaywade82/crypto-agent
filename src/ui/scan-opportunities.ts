@@ -76,3 +76,36 @@ export const mergeScanOpportunities = (
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 24);
 };
+
+export interface MonitoredMarket {
+  readonly symbol: string;
+  readonly price: number;
+  readonly regime: string;
+  readonly trend: string;
+  readonly scannedAt: string;
+  readonly setupsCount: number;
+}
+
+export const marketFromTrace = (symbol: string, trace: PipelineTrace): MonitoredMarket => {
+  const at = new Date().toLocaleTimeString('en-IN', { hour12: false });
+  const price = trace.state?.price.mark ?? trace.state?.price.last ?? 0;
+  const trend = trace.state?.timeframes['1h']?.structure.trend ?? 'NEUTRAL';
+  return {
+    symbol,
+    price,
+    regime: trace.regime,
+    trend,
+    scannedAt: at,
+    setupsCount: trace.setups.length,
+  };
+};
+
+export const mergeMonitoredMarkets = (
+  prev: readonly MonitoredMarket[],
+  incoming: MonitoredMarket
+): MonitoredMarket[] => {
+  const bySymbol = new Map<string, MonitoredMarket>();
+  for (const m of prev) bySymbol.set(m.symbol, m);
+  bySymbol.set(incoming.symbol, incoming);
+  return [...bySymbol.values()];
+};

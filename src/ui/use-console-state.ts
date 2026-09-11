@@ -5,13 +5,18 @@ import { PromptHistory } from './history.js';
 import { useAgentChat, usePortfolio } from './app-hooks.js';
 import { runCommand } from './app-commands.js';
 import { useAutoScan, useStreamBoot } from './use-app-boot.js';
+import { onCouncilPipelineTrace } from '../engines/pipeline-trace-bus.js';
+import type { CouncilTrigger } from '../engines/council-types.js';
 import {
-  agentEntry, systemEntry, type TranscriptEntry, userEntry,
+  agentEntry, councilTriggerEntry, pipelineToEntries, systemEntry,
+  type TranscriptEntry, userEntry,
 } from './transcript.js';
 import {
-  mergeScanOpportunities, opportunitiesFromTrace, type ScanOpportunity,
+  mergeMonitoredMarkets, mergeScanOpportunities, marketFromTrace,
+  type MonitoredMarket, opportunitiesFromTrace, type ScanOpportunity,
 } from './scan-opportunities.js';
 import type { PipelineTrace } from '../engines/pipeline.js';
+import type { PipelineSnapshots } from './pipeline-view.js';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 
@@ -74,27 +79,73 @@ export interface ConsoleState {
   readonly watchCount: number;
   readonly spinner: string;
   readonly opportunities: readonly ScanOpportunity[];
+  readonly markets: readonly MonitoredMarket[];
+  readonly clearOpportunities: () => void;
+  readonly pipelineSnapshots: PipelineSnapshots;
+  readonly pipelineCycle: number;
+}
+
+interface PipelineIngestState {
+  readonly opportunities: readonly ScanOpportunity[];
+  readonly markets: readonly MonitoredMarket[];
+  readonly pipelineSnapshots: PipelineSnapshots;
+  readonly pipelineCycle: number;
+  readonly ingestPipeline: (symbol: string, trace: PipelineTrace, trigger?: CouncilTrigger) => void;
   readonly clearOpportunities: () => void;
 }
+
+const usePipelineIngest = (
+  pushTranscript: (e: TranscriptEntry) => void,
+  appendMany: (entries: readonly TranscriptEntry[]) => void
+): PipelineIngestState => {
+  const [opportunities, setOpportunities] = useState<ScanOpportunity[]>([]);
+  const [markets, setMarkets] = useState<MonitoredMarket[]>([]);
+  const [pipelineSnapshots, setPipelineSnapshots] = useState<PipelineSnapshots>({});
+  const [pipelineCycle, setPipelineCycle] = useState(0);
+
+  const ingestTrace = useCallback((symbol: string, trace: PipelineTrace): void => {
+    const sym = symbol.toUpperCase();
+    setPipelineSnapshots((prev) => ({ ...prev, [sym]: { ...trace, symbol: sym } }));
+    setPipelineCycle((n) => n + 1);
+    setOpportunities((prev) => mergeScanOpportunities(prev, opportunitiesFromTrace(symbol, trace)));
+    setMarkets((prev) => mergeMonitoredMarkets(prev, marketFromTrace(symbol, trace)));
+  }, []);
+
+  const ingestPipeline = useCallback((symbol: string, trace: PipelineTrace, trigger?: CouncilTrigger): void => {
+    if (trigger) pushTranscript(councilTriggerEntry(trigger));
+    appendMany(pipelineToEntries(symbol, trace));
+    ingestTrace(symbol, trace);
+  }, [appendMany, ingestTrace, pushTranscript]);
+
+  useEffect(() => onCouncilPipelineTrace(({ symbol, trace, trigger }) => {
+    ingestPipeline(symbol, trace, trigger);
+  }), [ingestPipeline]);
+
+  const clearOpportunities = useCallback((): void => {
+    setOpportunities([]); setMarkets([]); setPipelineSnapshots({}); setPipelineCycle(0);
+  }, []);
+
+  return { opportunities, markets, pipelineSnapshots, pipelineCycle, ingestPipeline, clearOpportunities };
+};
 
 export const useConsoleState = (_exit: () => void): ConsoleState => {
   const defaultSym = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT').split(',')[0]?.trim().toUpperCase() ?? 'BTCUSDT';
   const [focusSymbol, setFocusSymbol] = useState(defaultSym);
   const [auto, setAuto] = useState({ enabled: true, interval: 300 });
-  const [opportunities, setOpportunities] = useState<ScanOpportunity[]>([]);
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
   const history = useMemo(() => new PromptHistory(), []);
   const { transcript, pushTranscript, appendMany, clearTranscript, watchCount } = useTranscriptBuffer(orchestrator);
+  const { opportunities, markets, pipelineSnapshots, pipelineCycle, ingestPipeline, clearOpportunities } =
+    usePipelineIngest(pushTranscript, appendMany);
 
   const onActivity = useCallback((text: string): void => {
     pushTranscript(systemEntry('Activity', [text]));
   }, [pushTranscript]);
 
-  const ingestTrace = useCallback((_symbol: string, trace: PipelineTrace): void => {
-    setOpportunities((prev) => mergeScanOpportunities(prev, opportunitiesFromTrace(_symbol, trace)));
-  }, []);
-
-  const chat = useAgentChat(orchestrator, onActivity, appendMany, pushTranscript, ingestTrace);
+  const chat = useAgentChat({
+    orchestrator, onActivity, appendMany,
+    onTrace: (symbol, trace) => ingestPipeline(symbol, trace),
+  });
   const streamLive = useStreamBoot();
   useAutoScan(auto.enabled, auto.interval, chat.runKernelScan, chat.isBusy);
   const port = usePortfolio(orchestrator);
@@ -103,8 +154,8 @@ export const useConsoleState = (_exit: () => void): ConsoleState => {
   return {
     transcript, pushTranscript, appendMany, clearTranscript,
     focusSymbol, setFocusSymbol, auto, setAuto, streamLive, port, chat,
-    orchestrator, history, watchCount, spinner, opportunities,
-    clearOpportunities: (): void => setOpportunities([]),
+    orchestrator, history, watchCount, spinner, opportunities, markets,
+    clearOpportunities, pipelineSnapshots, pipelineCycle,
   };
 };
 

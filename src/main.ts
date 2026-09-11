@@ -77,7 +77,6 @@ const executeWithStreaming = async (prompt: string): Promise<void> => {
 export const startInteractiveRepl = async (): Promise<void> => {
   if (process.stdin.isTTY) {
     if (!process.env.LOG_LEVEL) process.env.LOG_LEVEL = 'warn';
-    process.stdout.write('\x1b[2J\x1b[H');
     const kernel = getKernel();
     if (kernel.killSwitch.halted && kernel.venue === 'paper') {
       kernel.killSwitch.resume('paper mode auto-armed', 'boot');
@@ -85,6 +84,7 @@ export const startInteractiveRepl = async (): Promise<void> => {
     const { waitUntilExit } = render(React.createElement(App), {
       exitOnCtrlC: true,
       patchConsole: false,
+      alternateScreen: true,
     });
     await waitUntilExit();
     process.stdout.write('\n');

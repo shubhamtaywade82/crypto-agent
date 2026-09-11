@@ -34,8 +34,8 @@ const usePipelineRunner = (opts: PipelineRunnerOpts): {
     setBusy(true); setStatus(`Pipeline ${symbol}...`);
     try {
       const trace = await getKernel().runPipeline(symbol);
-      appendMany(pipelineToEntries(symbol, trace));
-      onTrace?.(symbol, trace);
+      if (onTrace) onTrace(symbol, trace);
+      else appendMany(pipelineToEntries(symbol, trace));
       appendMsg({ id: String(Date.now()), role: 'system', title: `🛡️ ${symbol}`, content: formatTrace(symbol, trace) });
     } catch (err) {
       onActivity(`ERR ${symbol}: ${err instanceof Error ? err.message : String(err)}`);
@@ -43,23 +43,37 @@ const usePipelineRunner = (opts: PipelineRunnerOpts): {
   }, [appendMany, appendMsg, onActivity, onTrace, setBusy, setStatus]);
 
   const runKernelScan = useCallback(async (symbols?: readonly string[]): Promise<void> => {
-    for (const sym of (symbols?.length ? symbols : DEFAULT_SYMBOLS)) await runPipelineTrace(sym);
-  }, [runPipelineTrace]);
+    const targets = symbols?.length ? symbols : DEFAULT_SYMBOLS;
+    onActivity(`Autonomous scan started (${targets.join(', ')})`);
+    for (const sym of targets) await runPipelineTrace(sym);
+    onActivity(`Autonomous scan completed (${targets.length} symbols evaluated)`);
+  }, [onActivity, runPipelineTrace]);
 
   return { runPipelineTrace, runKernelScan };
 };
 
-export const useAgentChat = (
-  orchestrator: WatchOrchestrator,
-  onActivity: (text: string) => void,
-  appendMany: (entries: readonly TranscriptEntry[]) => void,
-  _pushTranscript: (e: TranscriptEntry) => void,
-  onTrace?: (symbol: string, trace: PipelineTrace) => void
-): {
-  messages: ChatMessage[]; isBusy: boolean; status: string; steps: AgentStep[]; response: string;
-  runTurn: (prompt: string) => Promise<string>; runPipelineTrace: (sym: string) => Promise<void>;
-  runKernelScan: (syms?: readonly string[]) => Promise<void>; clearMessages: () => void; addSystemNote: (msg: string) => void;
-} => {
+export interface AgentChatOpts {
+  readonly orchestrator: WatchOrchestrator;
+  readonly onActivity: (text: string) => void;
+  readonly appendMany: (entries: readonly TranscriptEntry[]) => void;
+  readonly onTrace?: (symbol: string, trace: PipelineTrace) => void;
+}
+
+export interface AgentChatResult {
+  readonly messages: ChatMessage[];
+  readonly isBusy: boolean;
+  readonly status: string;
+  readonly steps: AgentStep[];
+  readonly response: string;
+  readonly runTurn: (prompt: string) => Promise<string>;
+  readonly runPipelineTrace: (sym: string) => Promise<void>;
+  readonly runKernelScan: (syms?: readonly string[]) => Promise<void>;
+  readonly clearMessages: () => void;
+  readonly addSystemNote: (msg: string) => void;
+}
+
+export const useAgentChat = (opts: AgentChatOpts): AgentChatResult => {
+  const { orchestrator, onActivity, appendMany, onTrace } = opts;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [status, setStatus] = useState('Idle');

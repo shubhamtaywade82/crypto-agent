@@ -1,58 +1,107 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { getKernel } from '../../kernel.js';
+import type { TradeOutcomeRecord } from '../../learning/trade-ledger.js';
 
-const FINDINGS = [
-  { time: '11:45:00', title: 'Breakout Retest OOS validation PASSED', note: 'Strategy promoted to ACTIVE tier with 2 approved cells' },
-  { time: '11:12:30', title: 'SOLUSDT false-breakout rate elevated', note: 'Dynamic execution filter increased spread tolerance cutoff to 2.0 bps' },
-  { time: '10:30:15', title: 'Pullback Reclaim positive expectancy confirmed', note: '128 trades logged: win rate 58.6%, average R-multiple +0.31R' },
-  { time: '09:15:00', title: 'Mean Reversion v2 RETIRED', note: 'Consecutive negative OOS drift observed in high volatility regime' },
-];
+const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
 
-const FindingsList = (): React.JSX.Element => (
-  <Box flexDirection="column">
-    <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
-    <Text bold color="yellow">EMPIRICAL RESEARCH FINDINGS</Text>
-    {FINDINGS.map((f) => (
-      <Box key={f.time} flexDirection="column" marginY={0}>
-        <Text color="gray">[{f.time}] <Text bold color="white">{f.title}</Text></Text>
-        <Text color="gray">        ↳ {f.note}</Text>
-      </Box>
-    ))}
-  </Box>
-);
+const bar = (pct: number): string => {
+  const filled = Math.round(Math.min(10, Math.max(0, pct / 10)));
+  return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}]`;
+};
 
-const RegimeWinRates = (): React.JSX.Element => (
-  <Box flexDirection="column">
-    <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
-    <Text bold color="cyan">WIN-RATE BY MARKET REGIME</Text>
-    <Text color="gray">TREND_UP:        [████████░░] 64% (n=182)</Text>
-    <Text color="gray">EXPANSION:       [███████░░░] 58% (n=94)</Text>
-    <Text color="gray">RANGE:           [█████░░░░░] 44% (n=112) - entries restricted</Text>
-    <Text color="gray">HIGH_VOLATILITY: [████░░░░░░] 35% (n=40) - gated out</Text>
-  </Box>
-);
+const formatEventFinding = (type: string, payload: Record<string, unknown>): string => {
+  if (type === 'strategy.promoted') return `Cell promoted: ${String(payload.cell ?? payload.strategyId ?? '')}`;
+  if (type === 'strategy.retired') return `Strategy retired: ${String(payload.reason ?? payload.strategyId ?? '')}`;
+  if (type === 'pipeline.rejected') return `Pipeline rejected on ${String(payload.symbol ?? '')}`;
+  if (type === 'trade.closed') return `Trade closed · R=${String(payload.rMultiple ?? '?')}`;
+  return type;
+};
 
-export const LearningView = (): React.JSX.Element => {
-  const k = getKernel();
-  const outcomes = k.ledger.outcomes;
+const ledgerStats = (outcomes: readonly TradeOutcomeRecord[]): {
+  count: number; winRate: number; netPnl: number; avgR: number; pf: number;
+} => {
   const count = outcomes.length;
   const wins = outcomes.filter((o) => o.pnl > 0).length;
-  const winRate = count > 0 ? (wins / count) * 100 : 54.2;
   const netPnl = outcomes.reduce((acc, o) => acc + o.pnl, 0);
+  const avgR = count > 0 ? outcomes.reduce((a, o) => a + o.rMultiple, 0) / count : 0;
+  const grossWin = outcomes.filter((o) => o.pnl > 0).reduce((a, o) => a + o.pnl, 0);
+  const grossLoss = Math.abs(outcomes.filter((o) => o.pnl < 0).reduce((a, o) => a + o.pnl, 0));
+  const pf = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 99 : 0;
+  return { count, winRate: count > 0 ? (wins / count) * 100 : 0, netPnl, avgR, pf };
+};
+
+const useLedgerPoll = (): ReturnType<typeof getKernel>['ledger'] => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 3000);
+    return (): void => clearInterval(t);
+  }, []);
+  return getKernel().ledger;
+};
+
+const StatsRow = ({ stats, openTrades }: { readonly stats: ReturnType<typeof ledgerStats>; readonly openTrades: number }): React.JSX.Element => (
+  <Box flexDirection="row" gap={3} flexWrap="wrap">
+    <Text color="gray">Closed: <Text bold color="white">{stats.count}</Text></Text>
+    <Text color="gray">Open: <Text bold color="white">{openTrades}</Text></Text>
+    <Text color="gray">Win Rate: <Text bold color="green">{stats.winRate.toFixed(1)}%</Text></Text>
+    <Text color="gray">Net PnL: <Text bold color={stats.netPnl >= 0 ? 'green' : 'red'}>{stats.netPnl >= 0 ? '+' : ''}${stats.netPnl.toFixed(2)}</Text></Text>
+    <Text color="gray">Avg R: <Text bold color="white">{stats.avgR >= 0 ? '+' : ''}{stats.avgR.toFixed(2)}R</Text></Text>
+    <Text color="gray">PF: <Text bold color="white">{stats.pf > 0 ? stats.pf.toFixed(2) : '—'}</Text></Text>
+  </Box>
+);
+
+interface LearningData {
+  readonly findings: readonly { readonly time: string; readonly title: string; readonly note: string }[];
+  readonly byRegime: Map<string, { wins: number; n: number }>;
+}
+
+const useLearningData = (
+  k: ReturnType<typeof getKernel>,
+  outcomes: readonly { regime: string; pnl: number }[]
+): LearningData => {
+  const findings = k.store.readAll(40)
+    .filter((e) => e.type.startsWith('strategy.') || e.type.startsWith('trade.') || e.type.includes('pipeline'))
+    .slice(-6).reverse()
+    .map((e) => ({
+      time: new Date(e.at).toLocaleTimeString('en-IN', { hour12: false }),
+      title: e.type,
+      note: formatEventFinding(e.type, e.payload as Record<string, unknown>),
+    }));
+  const byRegime = new Map<string, { wins: number; n: number }>();
+  for (const o of outcomes) {
+    const bucket = byRegime.get(o.regime) ?? { wins: 0, n: 0 };
+    bucket.n += 1;
+    if (o.pnl > 0) bucket.wins += 1;
+    byRegime.set(o.regime, bucket);
+  }
+  return { findings, byRegime };
+};
+
+export const LearningView = (): React.JSX.Element => {
+  const ledger = useLedgerPoll();
+  const k = getKernel();
+  const stats = ledgerStats(ledger.outcomes);
+  const { findings, byRegime } = useLearningData(k, ledger.outcomes);
 
   return (
     <Box flexDirection="column" gap={1} paddingX={1}>
       <Text bold color="cyan">SELF-IMPROVING TRADE LEDGER &amp; EMPIRICAL LEARNING</Text>
-      <Box flexDirection="row" gap={3}>
-        <Text color="gray">Trades Closed: <Text bold color="white">{count > 0 ? count : 428}</Text></Text>
-        <Text color="gray">Win Rate: <Text bold color="green">{winRate.toFixed(1)}%</Text></Text>
-        <Text color="gray">Net PnL: <Text bold color="green">+${count > 0 ? netPnl.toFixed(2) : '3,842.10'}</Text></Text>
-        <Text color="gray">Avg R: <Text bold color="white">+0.28R</Text></Text>
-        <Text color="gray">PF: <Text bold color="white">1.72</Text></Text>
-      </Box>
-      <FindingsList />
-      <RegimeWinRates />
+      <StatsRow stats={stats} openTrades={ledger.openTrades.length} />
+      <Text color="gray">{rule()}</Text>
+      <Text bold color="yellow">EVENT-DRIVEN FINDINGS (from durable store)</Text>
+      {findings.length === 0 ? (
+        <Text color="gray" italic>No learning events yet — closed trades and promotions will appear here.</Text>
+      ) : findings.map((f) => (
+        <Text key={`${f.time}-${f.title}`} color="gray">[{f.time}] <Text bold color="white">{f.title}</Text> ↳ {f.note}</Text>
+      ))}
+      <Text color="gray">{rule()}</Text>
+      <Text bold color="cyan">WIN-RATE BY REGIME (ledger)</Text>
+      {[...byRegime.entries()].length === 0 ? (
+        <Text color="gray" italic>No closed trades attributed to regimes yet.</Text>
+      ) : [...byRegime.entries()].sort((a, b) => b[1].n - a[1].n).map(([regime, { wins, n }]) => (
+        <Text key={regime} color="gray">{regime.padEnd(16)} {bar((wins / n) * 100)} {(wins / n * 100).toFixed(0)}% (n={n})</Text>
+      ))}
     </Box>
   );
 };

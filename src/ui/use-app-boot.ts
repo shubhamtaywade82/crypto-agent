@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getKernel } from '../kernel.js';
 import { bootEventCouncil } from '../engines/event-council.js';
 import { hydrateWatchMicro } from '../engines/market-hydrate.js';
@@ -27,9 +27,17 @@ export const useAutoScan = (
   run: () => Promise<void>,
   busy: boolean
 ): void => {
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const runRef = useRef(run);
+  runRef.current = run;
+
   useEffect(() => {
     if (!enabled) return undefined;
-    const t = setInterval(() => { if (!busy) void run(); }, intervalSec * 1000);
+    if (!busyRef.current) void runRef.current();
+    const t = setInterval(() => {
+      if (!busyRef.current) void runRef.current();
+    }, intervalSec * 1000);
     return (): void => clearInterval(t);
-  }, [enabled, intervalSec, busy, run]);
+  }, [enabled, intervalSec]);
 };

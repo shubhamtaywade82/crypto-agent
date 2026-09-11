@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { getKernel } from '../../kernel.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
+import type { TrackedOrder } from '../../engines/execution-engine.js';
 
 export interface OrdersViewProps {
   readonly selectedIndex: number;
@@ -18,7 +19,7 @@ const FSM_STEPS: readonly OrderStatus[] = [
 ];
 
 const OrdersTable = (p: {
-  readonly orders: readonly (ReturnType<typeof getKernel>['execution']['listOpen'] extends () => readonly (infer R)[] ? R : never)[];
+  readonly orders: readonly TrackedOrder[];
   readonly safeIdx: number;
 }): React.JSX.Element => (
   <Box flexDirection="column">
@@ -39,7 +40,7 @@ const OrdersTable = (p: {
   </Box>
 );
 
-const FsmLifecycle = ({ selected }: { readonly selected: { readonly intentId: string; readonly pair: string; readonly status: OrderStatus } }): React.JSX.Element => (
+const FsmLifecycle = ({ selected }: { readonly selected: TrackedOrder }): React.JSX.Element => (
   <Box flexDirection="column">
     <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
     <Text bold color="yellow">FSM LIFECYCLE: {selected.intentId} ({selected.pair})</Text>
@@ -61,27 +62,33 @@ const FsmLifecycle = ({ selected }: { readonly selected: { readonly intentId: st
   </Box>
 );
 
-export const OrdersView = ({ selectedIndex }: OrdersViewProps): React.JSX.Element => {
-  const k = getKernel();
-  const openOrders = k.execution.listOpen();
-  const sampleOrders = openOrders.length > 0 ? openOrders : [
-    {
-      intentId: 'd_91fa2', pair: 'B-BTC_USDT', symbol: 'BTCUSDT', side: 'buy' as const,
-      quantity: 0.010, reduceOnly: false, status: 'POSITION_OPEN' as OrderStatus,
-      filledQuantity: 0.010, avgFillPrice: 112450.5, updatedAt: Date.now() - 120_000,
-      registeredAt: Date.now() - 120_200, intentType: 'ENTRY' as const,
-      expectedPrice: 112450.0, maxSlippageBps: 25,
-    },
-  ];
+const useOpenOrders = (): readonly TrackedOrder[] => {
+  const [orders, setOrders] = useState<readonly TrackedOrder[]>([]);
+  useEffect(() => {
+    const poll = (): void => setOrders(getKernel().execution.listOpen());
+    poll();
+    const t = setInterval(poll, 1500);
+    return (): void => clearInterval(t);
+  }, []);
+  return orders;
+};
 
-  const safeIdx = Math.min(selectedIndex, sampleOrders.length - 1);
-  const selected = sampleOrders[safeIdx] ?? sampleOrders[0]!;
+export const OrdersView = ({ selectedIndex }: OrdersViewProps): React.JSX.Element => {
+  const openOrders = useOpenOrders();
+  const safeIdx = openOrders.length > 0 ? Math.min(selectedIndex, openOrders.length - 1) : 0;
+  const selected = openOrders[safeIdx];
 
   return (
     <Box flexDirection="column" gap={1} paddingX={1}>
       <Text bold color="cyan">ORDER EXECUTION &amp; RECONCILIATION FSM</Text>
-      <OrdersTable orders={sampleOrders} safeIdx={safeIdx} />
-      <FsmLifecycle selected={selected} />
+      {openOrders.length === 0 ? (
+        <Text color="gray" italic>No open order intents — kernel is idle or all fills reconciled.</Text>
+      ) : (
+        <>
+          <OrdersTable orders={openOrders} safeIdx={safeIdx} />
+          {selected ? <FsmLifecycle selected={selected} /> : null}
+        </>
+      )}
     </Box>
   );
 };

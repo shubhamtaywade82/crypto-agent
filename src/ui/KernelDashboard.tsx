@@ -16,10 +16,10 @@ const bar = (qty: number, max: number, width = 8): string => {
   return `${'█'.repeat(filled)}${'░'.repeat(Math.max(0, width - filled))}`;
 };
 
-const fmtPrice = (p: number): string =>
+export const fmtPrice = (p: number): string =>
   p.toLocaleString('en-US', { maximumFractionDigits: 4 });
 
-const quotePrice = (snap: SymbolSnapshot | undefined): number | undefined => {
+export const quotePrice = (snap: SymbolSnapshot | undefined): number | undefined => {
   if (!snap) return undefined;
   if (snap.last !== undefined) return snap.last;
   if (snap.bestBid !== undefined && snap.bestAsk !== undefined) return (snap.bestBid + snap.bestAsk) / 2;
@@ -27,7 +27,7 @@ const quotePrice = (snap: SymbolSnapshot | undefined): number | undefined => {
   return undefined;
 };
 
-const DepthLadder = ({ bids, asks }: { bids: readonly BookLevel[]; asks: readonly BookLevel[] }): React.JSX.Element => {
+export const DepthLadder = ({ bids, asks }: { bids: readonly BookLevel[]; asks: readonly BookLevel[] }): React.JSX.Element => {
   const topAsks = [...asks].slice(0, 4).reverse();
   const topBids = bids.slice(0, 4);
   const maxQty = Math.max(...[...topAsks, ...topBids].map((l) => l.qty), 0.0001);
@@ -44,7 +44,7 @@ const DepthLadder = ({ bids, asks }: { bids: readonly BookLevel[]; asks: readonl
   );
 };
 
-const Tape = ({ trades }: { trades: readonly TradePrint[] }): React.JSX.Element => (
+export const Tape = ({ trades }: { trades: readonly TradePrint[] }): React.JSX.Element => (
   <Box flexDirection="column">
     {trades.slice(-6).reverse().map((t, i) => (
       <Text key={`${t.at}-${i}`} color={t.buyerIsMaker ? 'red' : 'green'}>
@@ -55,7 +55,7 @@ const Tape = ({ trades }: { trades: readonly TradePrint[] }): React.JSX.Element 
   </Box>
 );
 
-const SymbolRows = ({ symbols }: { symbols: readonly string[] }): React.JSX.Element => {
+export const SymbolRows = ({ symbols }: { symbols: readonly string[] }): React.JSX.Element => {
   const kernel = getKernel();
   return (
     <Box flexDirection="column">

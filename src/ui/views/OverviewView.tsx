@@ -1,10 +1,19 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { getKernel } from '../../kernel.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import type { ActivityTimelineItem } from '../types.js';
-import type { ScanOpportunity } from '../scan-opportunities.js';
+import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
 import { OpportunityTable } from '../components/OpportunityTable.js';
+import { DepthLadder, Tape } from '../KernelDashboard.js';
+import { LiveLtpTable, useLiveTick } from '../components/LiveLtpTable.js';
+import { TranscriptStrip } from '../components/TranscriptStrip.js';
+import { TraderBriefPanel } from '../components/TraderBriefPanel.js';
+import type { TranscriptEntry } from '../transcript.js';
+import { buildTraderBrief } from '../overview-brief.js';
+import type { PipelineSnapshots } from '../pipeline-view.js';
+import { kernelWatchSymbols } from '../../kernel-streams.js';
+import { ensureSymbolTracked } from '../../engines/market-hydrate.js';
 
 export interface OverviewViewProps {
   readonly selectedIndex: number;
@@ -12,29 +21,51 @@ export interface OverviewViewProps {
   readonly timeline: readonly ActivityTimelineItem[];
   readonly focusSymbol: string;
   readonly opportunities: readonly ScanOpportunity[];
+  readonly markets?: readonly MonitoredMarket[];
+  readonly isScanning?: boolean;
+  readonly transcript?: readonly TranscriptEntry[];
+  readonly pipelineSnapshots?: PipelineSnapshots;
 }
 
-const SubsystemsPanel = (): React.JSX.Element => {
-  const k = getKernel();
-  const ks = k.killSwitch.halted;
+const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => {
+  const snap = getKernel().marketStore.snapshot(symbol);
   return (
-    <Box flexDirection="row" gap={2} paddingY={0}>
-      <Box flexDirection="column" flexGrow={1}>
-        <Text bold color="cyan">AGENT SUB-SYSTEMS</Text>
-        <Text color="gray">● Watcher: <Text color="green">ACTIVE</Text></Text>
-        <Text color="gray">● Analyst: <Text color="green">15m/1h MTF</Text></Text>
-        <Text color="gray">● Strategist: <Text color="green">4 Setups</Text></Text>
-        <Text color="gray">● Risk Challenger: <Text color="green">ACTIVE</Text></Text>
-        <Text color="gray">● Policy Gateway: <Text color="green">AUTHORITATIVE</Text></Text>
+    <Box flexDirection="row" marginTop={1}>
+      <Box width="50%" flexDirection="column" paddingRight={1}>
+        <Text bold color="yellow">Depth ({symbol})</Text>
+        {snap?.bids.length ? <DepthLadder bids={snap.bids} asks={snap.asks} /> : <Text color="gray">depth streaming…</Text>}
       </Box>
-      <Box flexDirection="column" flexGrow={1}>
-        <Text bold color="cyan">SAFETY & VENUE</Text>
-        <Text color="gray">● Venue: <Text color="yellow">{k.venue.toUpperCase()}</Text></Text>
-        <Text color="gray">● Broker: <Text color="green">CONNECTED</Text></Text>
-        <Text color="gray">● Event Store: <Text color="green">DURABLE</Text></Text>
-        <Text color="gray">● Reconciler: <Text color="green">SYNCED</Text></Text>
-        <Text color="gray">● Kill Switch: <Text color={ks ? 'red' : 'green'}>{ks ? 'HALTED' : 'ARMED'}</Text></Text>
+      <Box width="50%" flexDirection="column">
+        <Text bold color="yellow">Tape ({symbol})</Text>
+        <Tape trades={snap?.trades ?? []} />
       </Box>
+    </Box>
+  );
+};
+
+const MarketWatchPanel = ({ focusSymbol }: { readonly focusSymbol: string }): React.JSX.Element => {
+  useLiveTick();
+  const symbols = useMemo(() => kernelWatchSymbols(), []);
+  useEffect(() => {
+    void ensureSymbolTracked(focusSymbol);
+    for (const sym of symbols) void ensureSymbolTracked(sym);
+  }, [focusSymbol, symbols]);
+  const micro = getKernel().marketStore.snapshot(focusSymbol)?.microstructure;
+
+  return (
+    <Box flexDirection="column" gap={0}>
+      <LiveLtpTable />
+      <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
+      <Box justifyContent="space-between" marginTop={1}>
+        <Text bold color="cyan">FOCUS — DEPTH & TAPE</Text>
+        <Text color="gray">/focus <Text bold color="yellow">{focusSymbol}</Text></Text>
+      </Box>
+      <DepthAndTape symbol={focusSymbol} />
+      {micro && (
+        <Text color="gray">
+          Δ ${micro.tradeDelta.toFixed(0)} │ bid depth: {micro.bidDepth.toFixed(1)} │ ask depth: {micro.askDepth.toFixed(1)} │ imb: {(micro.imbalance * 100).toFixed(0)}%
+        </Text>
+      )}
     </Box>
   );
 };
@@ -59,15 +90,27 @@ const PositionsSummary = ({ positions }: { positions: readonly BrokerPosition[] 
   </Box>
 );
 
-export const OverviewView = (p: OverviewViewProps): React.JSX.Element => (
+export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
+  useLiveTick();
+  const brief = buildTraderBrief(p.focusSymbol, p.pipelineSnapshots ?? {}, p.opportunities);
+
+  return (
   <Box flexDirection="column" gap={1} paddingX={1}>
-    <SubsystemsPanel />
+    <TraderBriefPanel brief={brief} />
+    <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
+    <MarketWatchPanel focusSymbol={p.focusSymbol} />
     <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
     <Box flexDirection="column">
-      <Text bold color="cyan">OPPORTUNITIES (from last kernel scan)</Text>
-      <OpportunityTable rows={p.opportunities} selectedIndex={p.selectedIndex} compact />
+      <OpportunityTable
+        rows={p.opportunities}
+        markets={p.markets}
+        isScanning={p.isScanning}
+        selectedIndex={p.selectedIndex}
+        compact
+      />
     </Box>
     <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
     <PositionsSummary positions={p.positions} />
+    {p.transcript ? <TranscriptStrip entries={p.transcript} limit={2} /> : null}
   </Box>
 );

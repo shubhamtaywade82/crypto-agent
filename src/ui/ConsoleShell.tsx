@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box } from 'ink';
+import { Box, useStdout } from 'ink';
 import { ConsoleHeader } from './components/ConsoleHeader.js';
 import { WorkspaceRouter } from './workspace-router.js';
 import { ConsoleInput } from './components/ConsoleInput.js';
@@ -49,6 +49,7 @@ const useConsoleNav = (s: ReturnType<typeof useConsoleState>, inputVal: string, 
     onEnterInspect: (tab: WorkspaceTab) => {
       if (tab === 'opps' || tab === 'orders' || tab === 'positions') nav.openModal({ type: 'decision_trace' });
     },
+    onSlashCommand: (prefix) => { setInputVal(prefix); },
   });
   const submit = useConsoleSubmit({
     s, inputVal, setInputVal, filterMode: false,
@@ -58,36 +59,78 @@ const useConsoleNav = (s: ReturnType<typeof useConsoleState>, inputVal: string, 
   return { nav, onSubmit };
 };
 
+const useConsoleHistoryControls = (
+  nav: ReturnType<typeof useTerminalNav>,
+  history: ReturnType<typeof useConsoleState>['history'],
+  inputVal: string,
+  setInputVal: (v: string) => void
+): {
+  readonly onHistoryUp: () => void;
+  readonly onHistoryDown: () => void;
+  readonly onEscape: () => void;
+} => {
+  const { handleUp, handleDown } = usePromptHistoryNavigation(history, inputVal, setInputVal);
+  const onHistoryUp = useCallback((): void => { nav.setCommandMode(true); handleUp(); }, [nav, handleUp]);
+  const onHistoryDown = useCallback((): void => { nav.setCommandMode(true); handleDown(); }, [nav, handleDown]);
+  const onEscape = useCallback((): void => { setInputVal(''); nav.setCommandMode(false); nav.closeModal(); }, [nav, setInputVal]);
+  return { onHistoryUp, onHistoryDown, onEscape };
+};
+
+interface ConsoleMetrics {
+  readonly timeline: readonly ActivityTimelineItem[];
+  readonly circuit: ReturnType<typeof deriveCircuitState>;
+  readonly agentState: 'BUSY' | 'AUTONOMOUS' | 'PAUSED';
+}
+
+const useConsoleMetrics = (s: ReturnType<typeof useConsoleState>, k: ReturnType<typeof getKernel>): ConsoleMetrics => {
+  const timeline = useMemo(() => s.transcript.map(entryToTimelineItem), [s.transcript]);
+  const circuit = deriveCircuitState(s.port.dailyLossPercent, s.port.drawdownPercent, s.port.lossStreak, k.limits);
+  const agentState = s.chat.isBusy ? 'BUSY' : s.auto.enabled ? 'AUTONOMOUS' : 'PAUSED';
+  return { timeline, circuit, agentState };
+};
+
+const ConsoleWorkspaceView = (p: {
+  readonly nav: ReturnType<typeof useTerminalNav>;
+  readonly s: ReturnType<typeof useConsoleState>;
+  readonly positions: readonly BrokerPosition[];
+  readonly timeline: readonly ActivityTimelineItem[];
+  readonly height: number;
+}): React.JSX.Element => (
+  <Box flexDirection="column" height={p.height} overflow="hidden">
+    <WorkspaceRouter
+      activeTab={p.nav.activeTab} selectedIndex={p.nav.selectedIndex} activeModal={p.nav.activeModal}
+      closeModal={p.nav.closeModal} positions={p.positions} timeline={p.timeline} focusSymbol={p.s.focusSymbol}
+      opportunities={p.s.opportunities} markets={p.s.markets} isScanning={p.s.chat.isBusy}
+      pipelineSnapshots={p.s.pipelineSnapshots} transcript={p.s.transcript}
+      chat={p.s.chat} history={p.s.history}
+    />
+  </Box>
+);
+
 export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Element => {
   const s = useConsoleState(p.exit);
   const [inputVal, setInputVal] = useState('');
   const positions = usePositionsPoll();
-  const { handleUp, handleDown } = usePromptHistoryNavigation(s.history, inputVal, setInputVal);
   const { nav, onSubmit } = useConsoleNav(s, inputVal, setInputVal, p.exit);
+  const { onHistoryUp, onHistoryDown, onEscape } = useConsoleHistoryControls(nav, s.history, inputVal, setInputVal);
   const k = getKernel();
-
-  const timeline = useMemo(() => s.transcript.map(entryToTimelineItem), [s.transcript]);
-  const circuit = deriveCircuitState(s.port.dailyLossPercent, s.port.drawdownPercent, s.port.lossStreak, k.limits);
-  const agentState = s.chat.isBusy ? 'BUSY' : s.auto.enabled ? 'AUTONOMOUS' : 'PAUSED';
+  const { timeline, circuit, agentState } = useConsoleMetrics(s, k);
+  const { stdout } = useStdout();
+  const h = Math.max(10, (stdout.rows || process.stdout.rows || 24) - 5);
 
   return (
-    <Box flexDirection="column" paddingX={1} gap={0}>
+    <Box flexDirection="column" paddingX={1} gap={0} height={stdout.rows || undefined} overflow="hidden">
       <ConsoleHeader
         venue={k.venue} agentState={agentState} marketOk={s.streamLive}
         executionOk={!k.killSwitch.halted} circuit={circuit} killSwitchHalted={k.killSwitch.halted}
-        cycle={1} time={new Date().toLocaleTimeString('en-IN', { hour12: false })}
-        equity={s.port.equity} dailyPnl={s.port.dailyRealizedPnl}
+        cycle={s.pipelineCycle} equity={s.port.equity} dailyPnl={s.port.dailyRealizedPnl}
       />
-      <WorkspaceRouter
-        activeTab={nav.activeTab} selectedIndex={nav.selectedIndex} activeModal={nav.activeModal}
-        closeModal={nav.closeModal} positions={positions} timeline={timeline} focusSymbol={s.focusSymbol}
-        opportunities={s.opportunities}
-      />
+      <ConsoleWorkspaceView nav={nav} s={s} positions={positions} timeline={timeline} height={h} />
       <ConsoleInput
         value={inputVal} busy={s.chat.isBusy} focused={nav.commandMode || inputVal.length > 0}
         statusText={s.chat.status} spinner={s.spinner}
-        onSubmit={onSubmit} onChange={setInputVal} onHistoryUp={handleUp} onHistoryDown={handleDown}
-        onEscape={() => { setInputVal(''); nav.closeModal(); }}
+        onSubmit={onSubmit} onChange={setInputVal} onHistoryUp={onHistoryUp} onHistoryDown={onHistoryDown}
+        onEscape={onEscape}
       />
       <ConsoleFooter activeTab={nav.activeTab} commandMode={nav.commandMode} />
     </Box>

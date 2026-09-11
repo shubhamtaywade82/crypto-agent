@@ -1,22 +1,32 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
+import { getKernel } from '../../kernel.js';
 
 export interface PositionsViewProps {
   readonly positions: readonly BrokerPosition[];
   readonly selectedIndex: number;
 }
 
-const PositionDetail = ({ p }: { readonly p: BrokerPosition }): React.JSX.Element => (
+const pairToSymbol = (pair: string): string => pair.replace(/^B-/, '').replace('_', '');
+
+const findLedgerTrade = (pair: string): ReturnType<typeof getKernel>['ledger']['openTrades'][number] | undefined => {
+  const sym = pairToSymbol(pair);
+  return getKernel().ledger.openTrades.find((t) => t.symbol === sym || pair.includes(t.symbol));
+};
+
+const PositionDetail = ({ p }: { readonly p: BrokerPosition }): React.JSX.Element => {
+  const ledger = findLedgerTrade(p.pair);
+  return (
   <Box flexDirection="column">
     <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
     <Text bold color="yellow">SELECTED POSITION: {p.pair} ({p.side.toUpperCase()})</Text>
-    <Text color="gray">├─ Strategy:     <Text color="white">Pullback Reclaim (v3.1)</Text></Text>
+    <Text color="gray">├─ Strategy:     <Text color="white">{ledger?.strategyId ?? '—'}</Text></Text>
     <Text color="gray">├─ Entry Price:  <Text color="white">{p.entryPrice.toFixed(2)} USDT</Text></Text>
-    <Text color="gray">├─ Leverage:     <Text color="white">{p.leverage ?? 2}x Isolated</Text></Text>
-    <Text color="gray">├─ Stop Loss:    <Text color="white">{(p.entryPrice * 0.98).toFixed(2)} USDT (-2.00%)</Text></Text>
-    <Text color="gray">├─ Take Profit:  <Text color="white">{(p.entryPrice * 1.05).toFixed(2)} USDT (+5.00%)</Text></Text>
-    <Text color="gray">└─ Excursions:   <Text color="white">MAE: 0.18R │ MFE: 1.45R │ Status: TRAILING_STOP_ACTIVE</Text></Text>
+    <Text color="gray">├─ Leverage:     <Text color="white">{p.leverage ?? ledger?.leverage ?? 2}x</Text></Text>
+    <Text color="gray">├─ Stop Loss:    <Text color="white">{ledger ? ledger.stopLoss.toFixed(2) : '—'} USDT</Text></Text>
+    <Text color="gray">├─ Take Profit:  <Text color="white">{ledger ? ledger.takeProfit.toFixed(2) : '—'} USDT</Text></Text>
+    <Text color="gray">└─ Planned R:R:  <Text color="white">{ledger ? ledger.plannedRr.toFixed(2) : '—'} · regime {ledger?.regime ?? '—'}</Text></Text>
     <Box gap={2} marginTop={1}>
       <Text color="cyan">[Enter] Details</Text>
       <Text color="cyan">[t] Adjust TPSL</Text>
@@ -24,7 +34,8 @@ const PositionDetail = ({ p }: { readonly p: BrokerPosition }): React.JSX.Elemen
       <Text color="cyan">[l] Lineage Trace</Text>
     </Box>
   </Box>
-);
+  );
+};
 
 const PositionsTable = (p: {
   readonly positions: readonly BrokerPosition[];

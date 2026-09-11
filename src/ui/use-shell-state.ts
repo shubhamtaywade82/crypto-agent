@@ -34,7 +34,6 @@ const useActivityLog = (): {
 };
 
 const noopMany = (_e: readonly import('./transcript.js').TranscriptEntry[]): void => undefined;
-const noopOne = (_e: import('./transcript.js').TranscriptEntry): void => undefined;
 
 export const useShellState = (_exit: () => void): {
   readonly mode: 'ops' | 'chat';
@@ -60,7 +59,7 @@ export const useShellState = (_exit: () => void): {
   const { activity, pushActivity, setActivity } = useActivityLog();
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
   const history = useMemo(() => new PromptHistory(), []);
-  const chat = useAgentChat(orchestrator, pushActivity, noopMany, noopOne, undefined);
+  const chat = useAgentChat({ orchestrator, onActivity: pushActivity, appendMany: noopMany });
   const streamLive = useStreamBoot();
   useAutoScan(auto.enabled, auto.interval, chat.runKernelScan, chat.isBusy);
   const port = usePortfolio(orchestrator);

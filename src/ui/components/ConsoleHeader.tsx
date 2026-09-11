@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import type { CircuitState } from '../../domain/risk/risk-config.js';
 
@@ -10,54 +10,70 @@ export interface ConsoleHeaderProps {
   readonly circuit: CircuitState;
   readonly killSwitchHalted: boolean;
   readonly cycle: number;
-  readonly time: string;
   readonly equity: number;
   readonly dailyPnl: number;
 }
 
-const circuitBadge = (c: CircuitState, halted: boolean): { label: string; color: string } => {
-  if (halted) return { label: 'HALTED', color: 'red' };
-  switch (c) {
-    case 'NORMAL': return { label: 'NORMAL', color: 'green' };
-    case 'CAUTION': return { label: 'CAUTION', color: 'yellow' };
-    case 'REDUCED': return { label: 'REDUCED', color: 'magenta' };
-    case 'EMERGENCY': return { label: 'EMERGENCY', color: 'red' };
-    default: return { label: 'UNKNOWN', color: 'gray' };
-  }
+const formatClock = (): string =>
+  new Date().toLocaleTimeString('en-IN', { hour12: false });
+
+const useClock = (): string => {
+  const [time, setTime] = useState(formatClock);
+  useEffect(() => {
+    const t = setInterval(() => setTime(formatClock()), 1000);
+    return (): void => clearInterval(t);
+  }, []);
+  return time;
 };
 
+const circuitLabel = (c: CircuitState, halted: boolean): string => {
+  if (halted) return 'HALTED';
+  return c;
+};
+
+const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 2));
+
+const HeaderMetrics = ({ p, pnlSign, pnlColor, time }: {
+  readonly p: ConsoleHeaderProps; readonly pnlSign: string; readonly pnlColor: string; readonly time: string;
+}): React.JSX.Element => (
+  <>
+    <Text color="gray"> │ </Text>
+    <Text>Eq </Text><Text bold>${p.equity.toFixed(2)}</Text>
+    <Text color="gray"> │ </Text>
+    <Text>PnL </Text><Text color={pnlColor}>{pnlSign}${p.dailyPnl.toFixed(2)}</Text>
+    <Text color="gray"> │ </Text>
+    <Text color="gray">#{p.cycle} {time}</Text>
+  </>
+);
+
 export const ConsoleHeader = (p: ConsoleHeaderProps): React.JSX.Element => {
-  const cBadge = circuitBadge(p.circuit, p.killSwitchHalted);
+  const time = useClock();
+  const risk = circuitLabel(p.circuit, p.killSwitchHalted);
   const pnlSign = p.dailyPnl >= 0 ? '+' : '';
   const pnlColor = p.dailyPnl >= 0 ? 'green' : 'red';
-  const modeColor = p.venue.toLowerCase() === 'live' ? 'magenta' : 'yellow';
+  const venueColor = p.venue.toLowerCase() === 'live' ? 'magenta' : 'yellow';
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={1}>
-      <Box justifyContent="space-between">
-        <Box gap={1}>
-          <Text bold color="cyan">CRYPTO-AGENT</Text>
-          <Text color="gray">│</Text>
-          <Text color={modeColor}>● {p.venue.toUpperCase()}</Text>
-          <Text color="gray">│</Text>
-          <Text color="white">agent:<Text bold color="green">{p.agentState}</Text></Text>
-          <Text color="gray">│</Text>
-          <Text color="white">market:<Text color={p.marketOk ? 'green' : 'red'}>{p.marketOk ? 'OK' : 'STALE'}</Text></Text>
-          <Text color="gray">│</Text>
-          <Text color="white">exec:<Text color={p.executionOk ? 'green' : 'red'}>{p.executionOk ? 'OK' : 'ERR'}</Text></Text>
-          <Text color="gray">│</Text>
-          <Text color="white">risk:<Text color={cBadge.color}>{cBadge.label}</Text></Text>
-        </Box>
-        <Box gap={1}>
-          <Text color="white">Eq: <Text bold>${p.equity.toFixed(2)}</Text></Text>
-          <Text color="gray">│</Text>
-          <Text color="white">PnL: <Text color={pnlColor}>{pnlSign}${p.dailyPnl.toFixed(2)}</Text></Text>
-          <Text color="gray">│</Text>
-          <Text color="gray">#{p.cycle}</Text>
-          <Text color="gray">│</Text>
-          <Text color="gray">{p.time}</Text>
-        </Box>
-      </Box>
+    <Box flexDirection="column" marginBottom={0}>
+      <Text wrap="truncate">
+        <Text bold color="cyan">CRYPTO-AGENT</Text>
+        <Text color="gray"> │ </Text>
+        <Text color={venueColor}>● {p.venue.toUpperCase()}</Text>
+        <Text color="gray"> │ </Text>
+        <Text>agent:</Text>
+        <Text bold color={p.agentState === 'BUSY' ? 'yellow' : 'green'}>{p.agentState}</Text>
+        <Text color="gray"> │ </Text>
+        <Text>MD:</Text>
+        <Text color={p.marketOk ? 'green' : 'red'}>{p.marketOk ? 'OK' : 'STALE'}</Text>
+        <Text color="gray"> │ </Text>
+        <Text>exec:</Text>
+        <Text color={p.executionOk ? 'green' : 'red'}>{p.executionOk ? 'OK' : 'ERR'}</Text>
+        <Text color="gray"> │ </Text>
+        <Text>risk:</Text>
+        <Text color={risk === 'NORMAL' ? 'green' : 'yellow'}>{risk}</Text>
+        <HeaderMetrics p={p} pnlSign={pnlSign} pnlColor={pnlColor} time={time} />
+      </Text>
+      <Text color="gray">{rule()}</Text>
     </Box>
   );
 };

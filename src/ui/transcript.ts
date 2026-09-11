@@ -1,3 +1,4 @@
+import type { CouncilTrigger } from '../engines/council-types.js';
 import type { PipelineTrace } from '../engines/pipeline.js';
 
 export type TranscriptActor =
@@ -102,6 +103,28 @@ export const pipelineToEntries = (symbol: string, trace: PipelineTrace): Transcr
   pushDecisionEntries(out, symbol, trace);
   return out;
 };
+
+const councilTriggerLines = (trigger: CouncilTrigger): string[] => {
+  if (trigger.type === 'PRICE_WATCH') {
+    return [
+      `${trigger.event.condition.symbol} watch fired`,
+      `${trigger.event.condition.strategy} @ $${trigger.event.condition.targetPrice}`,
+      `now=$${trigger.event.currentPrice}`,
+    ];
+  }
+  if (trigger.type === 'CANDLE_CLOSE') return [`${trigger.symbol} ${trigger.timeframe} candle closed`];
+  if (trigger.type === 'REGIME_CHANGE') return [`${trigger.symbol} ${trigger.from} → ${trigger.to}`];
+  if (trigger.type === 'SETUP_DETECTED') return [`${trigger.symbol} setups=${trigger.count}`];
+  return [
+    `${trigger.symbol} ${trigger.timeframe} ${trigger.eventType}`,
+    trigger.label, `direction=${trigger.direction}`,
+  ];
+};
+
+export const councilTriggerEntry = (trigger: CouncilTrigger): TranscriptEntry => ({
+  id: `council-${Date.now()}`, at: timeLabel(), actor: 'MARKET',
+  title: `Council ${trigger.type}`, lines: councilTriggerLines(trigger),
+});
 
 export const systemEntry = (title: string, lines: string[]): TranscriptEntry => ({
   id: `${Date.now()}-${Math.random()}`, at: timeLabel(), actor: 'SYSTEM', title, lines,

@@ -55,4 +55,11 @@ describe('PromptHistory', () => {
     expect(hist.navigateUp('')).toBe('SOLUSDT');
     expect(hist.navigateUp('')).toBe('SOLUSDT');
   });
+
+  it('exposes saved items via getItems', () => {
+    const hist = new PromptHistory(tmpFile);
+    hist.save('item 1');
+    hist.save('item 2');
+    expect(hist.getItems()).toEqual(['item 1', 'item 2']);
+  });
 });

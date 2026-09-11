@@ -30,30 +30,37 @@ const actorColor = (act: string): string => {
   }
 };
 
+const TimelineTable = (p: { readonly timeline: readonly ActivityTimelineItem[]; readonly safeIdx: number }): React.JSX.Element => (
+  <Box flexDirection="column">
+    <Text color="gray">   TIME      LEVEL    ACTOR         EVENT SUMMARY</Text>
+    {p.timeline.map((item, idx) => {
+      const isSel = idx === p.safeIdx;
+      return (
+        <Text key={item.id} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
+          {isSel ? ' >' : '  '} {item.at.padEnd(9)} <Text color={isSel ? 'black' : levelColor(item.level)}>{item.level.padEnd(8)}</Text> <Text color={isSel ? 'black' : actorColor(item.actor)}>{item.actor.padEnd(13)}</Text> {item.summary}
+        </Text>
+      );
+    })}
+  </Box>
+);
+
 export const EventsView = ({ timeline, selectedIndex }: EventsViewProps): React.JSX.Element => {
-  const items = timeline;
-  const safeIdx = Math.min(selectedIndex, Math.max(0, items.length - 1));
+  const safeIdx = Math.min(selectedIndex, Math.max(0, timeline.length - 1));
+  const selected = timeline[safeIdx];
 
   return (
     <Box flexDirection="column" gap={1} paddingX={1}>
       <Box justifyContent="space-between">
         <Text bold color="cyan">ACTIVITY TRANSCRIPT (CHRONOLOGICAL)</Text>
-        <Text color="gray">FOLLOW: <Text color="green">ON</Text></Text>
+        <Text color="gray">{timeline.length} events</Text>
       </Box>
-      {items.length === 0 ? (
-        <Text color="gray" italic>Waiting for activity — /scan, /pipeline SYM, or auto-scan will populate this stream</Text>
+      {timeline.length === 0 ? (
+        <Text color="gray" italic>Waiting for activity — /scan, /pipeline SYM, EventCouncil, or auto-scan</Text>
       ) : (
-        <Box flexDirection="column">
-          <Text color="gray">   TIME      LEVEL    ACTOR         EVENT SUMMARY</Text>
-          {items.map((item, idx) => {
-            const isSel = idx === safeIdx;
-            return (
-              <Text key={item.id} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-                {isSel ? ' >' : '  '} {item.at.padEnd(9)} <Text color={isSel ? 'black' : levelColor(item.level)}>{item.level.padEnd(8)}</Text> <Text color={isSel ? 'black' : actorColor(item.actor)}>{item.actor.padEnd(13)}</Text> {item.summary}
-              </Text>
-            );
-          })}
-        </Box>
+        <>
+          <TimelineTable timeline={timeline} safeIdx={safeIdx} />
+          {selected?.detail ? <Text color="white">{selected.detail}</Text> : null}
+        </>
       )}
     </Box>
   );

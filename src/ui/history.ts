@@ -64,6 +64,10 @@ export class PromptHistory {
     }
     return this.items[this.cursor];
   }
+
+  public getItems(): readonly string[] {
+    return [...this.items];
+  }
 }
 
 export const usePromptHistoryNavigation = (

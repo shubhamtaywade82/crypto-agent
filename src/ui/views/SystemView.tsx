@@ -1,60 +1,69 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { getKernel } from '../../kernel.js';
 import { binanceRateLimiter } from '../../guardians/rate-limiter.js';
 import { defaultModel } from '../../config.js';
+import { kernelWatchSymbols } from '../../kernel-streams.js';
+import { deriveCircuitState } from '../../domain/risk/risk-config.js';
 
-const RuntimeDataSection = ({ weight, healthy }: { readonly weight: number; readonly healthy: boolean }): React.JSX.Element => (
-  <Box flexDirection="row" gap={3}>
-    <Box flexDirection="column" flexGrow={1}>
-      <Text bold color="yellow">RUNTIME</Text>
-      <Text color="gray">├─ Model:         <Text color="white">{defaultModel}</Text></Text>
-      <Text color="gray">├─ Agent loop:    <Text color="green">RUNNING</Text></Text>
-      <Text color="gray">├─ Scheduler:     <Text color="green">5m DAEMON</Text></Text>
-      <Text color="gray">└─ Event Store:   <Text color="green">DURABLE ({healthy ? 'HEALTHY' : 'UNHEALTHY'})</Text></Text>
-    </Box>
-    <Box flexDirection="column" flexGrow={1}>
-      <Text bold color="yellow">MARKET DATA</Text>
-      <Text color="gray">├─ Binance WS:    <Text color="green">CONNECTED</Text></Text>
-      <Text color="gray">├─ Depth Stream:  <Text color="green">FRESH (&lt;500ms)</Text></Text>
-      <Text color="gray">├─ Trade Prints:  <Text color="green">STREAMING</Text></Text>
-      <Text color="gray">└─ IP Weight:     <Text color={weight > 800 ? 'red' : 'white'}>{weight} / 1200 cap</Text></Text>
-    </Box>
+const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
+
+const RuntimePanel = (p: { readonly councilOn: boolean; readonly healthy: boolean }): React.JSX.Element => (
+  <Box flexDirection="column" flexGrow={1}>
+    <Text bold color="yellow">RUNTIME</Text>
+    <Text color="gray">├─ Model:         <Text color="white">{defaultModel}</Text></Text>
+    <Text color="gray">├─ EventCouncil:  <Text color={p.councilOn ? 'green' : 'yellow'}>{p.councilOn ? 'ENABLED' : 'DISABLED'}</Text></Text>
+    <Text color="gray">└─ Event Store:   <Text color={p.healthy ? 'green' : 'red'}>{p.healthy ? 'HEALTHY' : 'UNHEALTHY'}</Text></Text>
   </Box>
 );
 
-const ExecutionSafetySection = (p: { readonly venue: string; readonly openOrders: number; readonly ks: boolean; readonly resvs: number }): React.JSX.Element => (
-  <Box flexDirection="row" gap={3}>
-    <Box flexDirection="column" flexGrow={1}>
-      <Text bold color="yellow">EXECUTION</Text>
-      <Text color="gray">├─ Venue:         <Text color="cyan">{p.venue.toUpperCase()}</Text></Text>
-      <Text color="gray">├─ Broker Conn:   <Text color="green">OK (Zero network errors)</Text></Text>
-      <Text color="gray">├─ Reconciler:    <Text color="green">SYNCED (0 orphaned intents)</Text></Text>
-      <Text color="gray">└─ Open Orders:   <Text color="white">{p.openOrders} tracked</Text></Text>
-    </Box>
-    <Box flexDirection="column" flexGrow={1}>
-      <Text bold color="yellow">SAFETY GOVERNOR</Text>
-      <Text color="gray">├─ Kill Switch:   <Text color={p.ks ? 'red' : 'green'}>{p.ks ? 'HALTED' : 'ARMED (NORMAL)'}</Text></Text>
-      <Text color="gray">├─ Max Drawdown:  <Text color="white">5.00% (Current: 1.80%)</Text></Text>
-      <Text color="gray">├─ Daily Loss:    <Text color="white">1.00% limit</Text></Text>
-      <Text color="gray">└─ Reservations:  <Text color="white">{p.resvs} active</Text></Text>
-    </Box>
+const MarketPanel = (p: { readonly fresh: number; readonly total: number; readonly weight: number }): React.JSX.Element => (
+  <Box flexDirection="column" flexGrow={1}>
+    <Text bold color="yellow">MARKET DATA</Text>
+    <Text color="gray">├─ Streams:       <Text color={p.fresh === p.total ? 'green' : 'yellow'}>{p.fresh}/{p.total} fresh</Text></Text>
+    <Text color="gray">└─ IP Weight:     <Text color={p.weight > 800 ? 'red' : 'white'}>{p.weight} / 1200</Text></Text>
   </Box>
 );
+
+const useMarketPoll = (): { fresh: number; total: number } => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 2000);
+    return (): void => clearInterval(t);
+  }, []);
+  const k = getKernel();
+  const symbols = kernelWatchSymbols();
+  return { fresh: symbols.filter((s) => k.marketStore.isFresh(s, 45_000)).length, total: symbols.length };
+};
 
 export const SystemView = (): React.JSX.Element => {
   const k = getKernel();
-  const weight = binanceRateLimiter.getCurrentWeight();
+  const snap = k.portfolio.peek();
+  const md = useMarketPoll();
+  const circuit = deriveCircuitState(snap.dailyLossPercent, snap.drawdownPercent, snap.lossStreak, k.limits);
 
   return (
     <Box flexDirection="column" gap={1} paddingX={1}>
       <Text bold color="cyan">SYSTEM HEALTH &amp; INFRASTRUCTURE CONSOLE</Text>
-      <RuntimeDataSection weight={weight} healthy={k.store.healthy} />
-      <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
-      <ExecutionSafetySection
-        venue={k.venue} openOrders={k.execution.listOpen().length}
-        ks={k.killSwitch.halted} resvs={k.reservations.active().length}
-      />
+      <Box flexDirection="row" gap={3}>
+        <RuntimePanel councilOn={process.env.EVENT_COUNCIL_ENABLED !== 'false'} healthy={k.store.healthy} />
+        <MarketPanel fresh={md.fresh} total={md.total} weight={binanceRateLimiter.getCurrentWeight()} />
+      </Box>
+      <Text color="gray">{rule()}</Text>
+      <Box flexDirection="row" gap={3}>
+        <Box flexDirection="column" flexGrow={1}>
+          <Text bold color="yellow">EXECUTION</Text>
+          <Text color="gray">├─ Venue:         <Text color="cyan">{k.venue.toUpperCase()}</Text></Text>
+          <Text color="gray">├─ Open orders:   <Text color="white">{k.execution.listOpen().length}</Text></Text>
+          <Text color="gray">└─ Open trades:   <Text color="white">{k.ledger.openTrades.length}</Text></Text>
+        </Box>
+        <Box flexDirection="column" flexGrow={1}>
+          <Text bold color="yellow">SAFETY GOVERNOR</Text>
+          <Text color="gray">├─ Kill Switch:   <Text color={k.killSwitch.halted ? 'red' : 'green'}>{k.killSwitch.halted ? 'HALTED' : 'ARMED'}</Text></Text>
+          <Text color="gray">├─ Circuit:       <Text color="white">{circuit}</Text></Text>
+          <Text color="gray">└─ Drawdown:      <Text color="white">{snap.drawdownPercent.toFixed(2)}% / {k.limits.maxDrawdownPercent}%</Text></Text>
+        </Box>
+      </Box>
     </Box>
   );
 };

@@ -2,7 +2,11 @@ import React from 'react';
 import { Box } from 'ink';
 import type { ActiveModal, ActivityTimelineItem, WorkspaceTab } from './types.js';
 import type { BrokerPosition } from '../infrastructure/broker/broker.js';
-import type { ScanOpportunity } from './scan-opportunities.js';
+import type { MonitoredMarket, ScanOpportunity } from './scan-opportunities.js';
+import type { PipelineSnapshots } from './pipeline-view.js';
+import type { TranscriptEntry } from './transcript.js';
+import type { useAgentChat } from './app-hooks.js';
+import type { PromptHistory } from './history.js';
 import { OverviewView } from './views/OverviewView.js';
 import { AgentView } from './views/AgentView.js';
 import { OpportunitiesView } from './views/OpportunitiesView.js';
@@ -24,13 +28,19 @@ export interface WorkspaceRouterProps {
   readonly timeline: readonly ActivityTimelineItem[];
   readonly focusSymbol: string;
   readonly opportunities: readonly ScanOpportunity[];
+  readonly markets?: readonly MonitoredMarket[];
+  readonly isScanning?: boolean;
+  readonly pipelineSnapshots: PipelineSnapshots;
+  readonly transcript: readonly TranscriptEntry[];
+  readonly chat?: ReturnType<typeof useAgentChat>;
+  readonly history?: PromptHistory;
 }
 
 const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
   switch (p.activeTab) {
-    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} />;
-    case 'agent': return <AgentView focusSymbol={p.focusSymbol} />;
-    case 'opps': return <OpportunitiesView selectedIndex={p.selectedIndex} opportunities={p.opportunities} />;
+    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} />;
+    case 'agent': return <AgentView focusSymbol={p.focusSymbol} snapshots={p.pipelineSnapshots} transcript={p.transcript} selectedIndex={p.selectedIndex} chat={p.chat} history={p.history} />;
+    case 'opps': return <OpportunitiesView selectedIndex={p.selectedIndex} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} />;
     case 'positions': return <PositionsView positions={p.positions} selectedIndex={p.selectedIndex} />;
     case 'orders': return <OrdersView selectedIndex={p.selectedIndex} />;
     case 'risk': return <RiskView />;
@@ -38,7 +48,7 @@ const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
     case 'learning': return <LearningView />;
     case 'events': return <EventsView timeline={p.timeline} selectedIndex={p.selectedIndex} />;
     case 'system': return <SystemView />;
-    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} />;
+    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} />;
   }
 };
 
