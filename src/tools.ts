@@ -132,25 +132,27 @@ const executeGatedOrder = async (input: PaperOrderInput): Promise<Record<string,
   const symbol = input.symbol.toUpperCase();
   const mtf = await buildMarketState(kernel.provider, symbol);
   const proposal = gatedProposal(input, mtf.state.price.last);
-  const assessed = await kernel.assess(proposal, mtf.state);
-  if (!assessed.risk.approved) {
+  const pair = kernel.router && kernel.broker.id === 'coindcx'
+    ? (await kernel.router.resolve(symbol)).pair
+    : `B-${symbol.replace(/USDT$/, '')}_USDT`;
+  const result = await kernel.gateway.execute(proposal, mtf.state, pair);
+  if (!result.ok) {
     return {
-      status: 'REJECTED_BY_RISK_ENGINE',
-      decisionId: assessed.risk.decisionId,
-      rejections: assessed.risk.rejections,
-      reasons: assessed.risk.reasons,
-      checks: assessed.risk.checks,
+      status: result.status,
+      reasons: result.reasons ?? result.risk?.reasons,
+      decisionId: result.risk?.decisionId,
+      rejections: result.risk?.rejections,
+      checks: result.risk?.checks,
     };
   }
-  const order = await kernel.executeProposal(proposal, assessed.sizing, assessed.risk);
   return {
-    status: order.status,
-    decisionId: assessed.risk.decisionId,
-    orderId: order.orderId,
-    quantity: assessed.sizing.quantity,
-    notional: assessed.sizing.notional,
-    leverage: assessed.sizing.leverage,
-    riskAmount: assessed.sizing.riskAmount,
+    status: result.status,
+    decisionId: result.intent.intentId,
+    orderId: result.order.orderId,
+    quantity: result.intent.sizing.quantity,
+    notional: result.intent.sizing.notional,
+    leverage: result.intent.sizing.leverage,
+    riskAmount: result.intent.sizing.riskAmount,
   };
 };
 

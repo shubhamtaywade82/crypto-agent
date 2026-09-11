@@ -1,28 +1,22 @@
 import type { IMarketDataProvider } from '../infrastructure/broker/broker.js';
 import type { MarketState } from '../domain/market/types.js';
-import type { RiskLimits } from '../domain/risk/risk-config.js';
-import { circuitRiskMultiplier, deriveCircuitState } from '../domain/risk/risk-config.js';
-import type { TradeProposal, ValidationResult } from '../domain/orders/trade-proposal.js';
-import { validateProposal } from '../domain/orders/trade-proposal.js';
+import { type RiskLimits, circuitRiskMultiplier, deriveCircuitState } from '../domain/risk/risk-config.js';
+import { type TradeProposal, type ValidationResult, validateProposal } from '../domain/orders/trade-proposal.js';
 import type { PortfolioState } from '../domain/portfolio/portfolio-state.js';
-import type { RiskDecision } from '../domain/risk/risk-decision.js';
-import { rejected } from '../domain/risk/risk-decision.js';
-import type { SizingResult } from './position-sizer.js';
-import { sizePosition, failedSizing } from './position-sizer.js';
+import { type RiskDecision, rejected } from '../domain/risk/risk-decision.js';
+import { type SizingResult, sizePosition, failedSizing } from './position-sizer.js';
 import { evaluateRisk } from './risk-engine.js';
 import { buildMarketState, buildMtfFromStore } from './market-state-engine.js';
 import { detectSetups, type SetupCandidate } from './setup-engine.js';
 import { stageExecution } from './pipeline-stage.js';
 export { stageExecution };
 import type { MtfResult } from './mtf-engine.js';
-import type { StrategyOutcome } from '../agents/schemas.js';
-import type { MarketAnalysis } from '../agents/schemas.js';
-import type { ChallengerVerdict } from '../agents/schemas.js';
+import type { StrategyOutcome, MarketAnalysis, ChallengerVerdict } from '../agents/schemas.js';
 import type { EventStore } from '../infrastructure/events/event-store.js';
 import type { ExecutionEngine, TrackedOrder } from './execution-engine.js';
 import type { PortfolioEngine } from './portfolio-engine.js';
 import type { RiskReservationManager } from './risk-reservations.js';
-import type { TradeLedger } from '../learning/trade-ledger.js';
+import type { TradeLedger, TradeFeatureSnapshot } from '../learning/trade-ledger.js';
 import type { MarketStateStore } from './market-state-store.js';
 import type { ContractSpec } from '../domain/futures/contract-spec.js';
 import { makeId } from '../domain/primitives.js';
@@ -43,63 +37,34 @@ export interface PipelineDeps {
   readonly execution: ExecutionEngine;
   readonly store: EventStore;
   readonly challengesEnabled: boolean;
-  /**
-   * Resolve the REAL venue contract spec for a market-data symbol.
-   * Implementations back this with the ContractRegistry; failures must
-   * reject the trade (degraded trading) instead of falling back to
-   * synthetic constraints.
-   */
+  /** Resolve venue contract spec; failures reject trade (degraded trading). */
   readonly specFor: (symbol: string) => Promise<ContractSpec>;
-  /** Global risk reservations (concurrency-safe portfolio accounting). */
   readonly reservations?: RiskReservationManager;
-  /**
-   * Durable global trading gate (kill switch). When it reports blocked,
-   * the pipeline returns status HALTED before consuming any LLM tokens
-   * or touching the venue.
-   */
+  /** Global trading gate (kill switch). When blocked, pipeline returns HALTED. */
   readonly isTradingAllowed?: () => { readonly allowed: boolean; readonly reason?: string };
-  /** Learning ledger: feature snapshots in, outcomes attributed back. */
   readonly ledger?: TradeLedger;
-  /**
-   * Event-driven market cache (Binance WS). When fresh, the pipeline
-   * builds its MTF ladder from the store with ZERO REST calls; REST
-   * remains the cold-start/recovery path.
-   */
+  /** Event-driven market cache (Binance WS) for zero-REST MTF ladders. */
   readonly marketStore?: MarketStateStore;
-  /** Max age of a store event before the pipeline falls back to REST. */
   readonly marketMaxStaleMs?: number;
-  /**
-   * Cross-venue execution gate (optional). When present, consulted right
-   * before risking capital: basis/spread/health beyond tolerance rejects
-   * the trade (REJECTED, source cross_venue) — never silently executes
-   * across a distorted venue pair.
-   */
+  /** Cross-venue execution gate: basis/spread/health beyond tolerance rejects trade. */
   readonly crossVenueGate?: (symbol: string) => Promise<{
-    readonly tradable: boolean;
-    readonly reasons: readonly string[];
+    readonly tradable: boolean; readonly reasons: readonly string[];
   }>;
-  /**
-   * Strategy-cell gate (V3.1 P0-5): ACTIVE strategy + approved cell =
-   * tradable. When present, consulted right after candidate resolution;
-   * a cell the research gate never approved is rejected before sizing.
-   */
+  /** Strategy-cell gate (ACTIVE strategy + approved cell = tradable). */
   readonly strategyGate?: (
     strategyId: string, setupType: string, regime: string
   ) => { readonly allowed: boolean; readonly reason?: string };
+  /** Market-research evidence gate: blocks confounded / insufficient_sample cells. */
+  readonly evidenceGate?: (symbol: string, setupType: string) => Promise<{ readonly allowed: boolean; readonly reason?: string }>;
   readonly analyze: (state: MarketState, evidence?: string) => Promise<MarketAnalysis>;
   readonly strategize: (request: StrategyRequest) => Promise<StrategyOutcome>;
-  readonly challenge?: (
-    proposal: TradeProposal,
-    state: MarketState
-  ) => Promise<ChallengerVerdict>;
+  readonly challenge?: (proposal: TradeProposal, state: MarketState) => Promise<ChallengerVerdict>;
   readonly execute?: (
-    proposal: TradeProposal,
-    sizing: SizingResult,
-    risk: RiskDecision,
-    reservationId?: string
+    proposal: TradeProposal, sizing: SizingResult, risk: RiskDecision, reservationId?: string
   ) => Promise<TrackedOrder>;
   readonly getLessons?: () => readonly string[];
   readonly getEvidence?: (symbol: string) => Promise<string | undefined>;
+  readonly registerPendingSnapshot?: (snapshot: TradeFeatureSnapshot) => void;
 }
 
 export type PipelineStatus =

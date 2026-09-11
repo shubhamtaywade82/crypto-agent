@@ -8,6 +8,61 @@ import { BinanceMarketDataProvider } from './infrastructure/binance/market-data-
 import type { IExecutionBroker } from './infrastructure/broker/broker.js';
 import type { Logger } from './infrastructure/observability/logger.js';
 import type { MarketStateStore } from './engines/market-state-store.js';
+import { PaperExecutionBroker } from './infrastructure/paper/paper-broker-adapter.js';
+import type { PerformanceEngine } from './engines/performance-engine.js';
+import type { TradeLedger } from './learning/trade-ledger.js';
+import type { PositionCloseAllocation } from './engines/fills-ledger.js';
+
+export type ExecutionVenue = 'paper' | 'coindcx';
+
+export interface VenueStack {
+  readonly venue: ExecutionVenue;
+  readonly log: Logger;
+  readonly performance: PerformanceEngine;
+  readonly ledger: TradeLedger;
+  readonly marketStore: MarketStateStore;
+}
+
+export const recordPaperClose = (
+  performance: PerformanceEngine, ledger: TradeLedger,
+  c: { decisionId?: string; pnl: number; at: number }
+): void => {
+  if (!c.decisionId) {
+    performance.recordTradeClosed(c.pnl, c.at);
+    return;
+  }
+  const rec = ledger.recordClosed(c.decisionId, c.pnl, c.at);
+  performance.recordTradeClosed(c.pnl, c.at, { persist: false });
+  if (!rec) performance.recordTradeClosed(c.pnl, c.at);
+};
+
+export const recordLiveClose = (
+  performance: PerformanceEngine, ledger: TradeLedger, a: PositionCloseAllocation
+): void => {
+  const rec = ledger.recordClosed(a.decisionId, a.pnl, a.at);
+  performance.recordTradeClosed(a.pnl, a.at, { persist: false });
+  if (!rec) performance.recordTradeClosed(a.pnl, a.at);
+};
+
+export const buildBroker = (
+  parts: VenueStack
+): {
+  client?: CoinDCXClient;
+  broker: IExecutionBroker;
+  router?: SymbolRouter;
+  registry?: ContractRegistry;
+  crossVenueGate?: (symbol: string) => Promise<{ readonly tradable: boolean; readonly reasons: readonly string[] }>;
+} => {
+  const { venue, log, performance, ledger, marketStore } = parts;
+  if (venue === 'coindcx') return buildCoinDCXStack(log, marketStore);
+  log.info('execution venue: paper');
+  return {
+    broker: new PaperExecutionBroker({
+      initialBalance: Number(process.env.PAPER_INITIAL_FUTURES_BALANCE ?? 10_000),
+      onClose: (c): void => recordPaperClose(performance, ledger, c),
+    }),
+  };
+};
 
 export interface CoinDCXStack {
   readonly client: CoinDCXClient;

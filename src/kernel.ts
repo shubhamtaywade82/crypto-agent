@@ -1,10 +1,9 @@
 import { CoinDCXClient } from '@nemesis-oss/coindcx-sdk';
 import type { IExecutionBroker } from './infrastructure/broker/broker.js';
 import { BinanceMarketDataProvider } from './infrastructure/binance/market-data-provider.js';
-import { buildCoinDCXStack } from './kernel-venue.js';
-import { buildSpecFor, buildPortfolio, buildPipelineDeps } from './kernel-builders.js';
+import { buildBroker, recordLiveClose, type ExecutionVenue } from './kernel-venue.js';
+import { buildSpecFor, buildPortfolio, buildPipelineDeps, buildStrategyGate } from './kernel-builders.js';
 import { SymbolRouter } from './infrastructure/coindcx/symbol-router.js';
-import { PaperExecutionBroker } from './infrastructure/paper/paper-broker-adapter.js';
 import { EventStore } from './infrastructure/events/event-store.js';
 import { createLogger, type Logger } from './infrastructure/observability/logger.js';
 import { loadRiskLimits, type RiskLimits } from './domain/risk/risk-config.js';
@@ -15,10 +14,10 @@ import { PerformanceEngine } from './engines/performance-engine.js';
 import { ExecutionEngine } from './engines/execution-engine.js';
 import { Reconciler } from './engines/reconciler.js';
 import { RiskReservationManager } from './engines/risk-reservations.js';
-import { FillsLedger, type PositionCloseAllocation } from './engines/fills-ledger.js';
+import { FillsLedger } from './engines/fills-ledger.js';
 import { SymbolLanes } from './engines/event-bus.js';
 import { KillSwitch } from './security/kill-switch.js';
-import { TradeLedger } from './learning/trade-ledger.js';
+import { TradeLedger, type TradeFeatureSnapshot } from './learning/trade-ledger.js';
 import { StrategyRegistry } from './learning/strategy-registry.js';
 import { buildStreams, startStreams, stopStreams, type KernelStreams } from './kernel-streams.js';
 import { runTradingPipeline, type PipelineTrace } from './engines/pipeline.js';
@@ -31,8 +30,9 @@ import type { MarketState } from './domain/market/types.js';
 import { MarketStateStore } from './engines/market-state-store.js';
 import { PortfolioStateStore } from './engines/portfolio-state-store.js';
 import { binanceClient, ollamaClient } from './config.js';
+import { PolicyGateway } from './engines/policy-gateway.js';
 
-export type ExecutionVenue = 'paper' | 'coindcx';
+export type { ExecutionVenue } from './kernel-venue.js';
 
 export interface AssessResult {
   readonly validation: ValidationResult;
@@ -52,6 +52,7 @@ export interface TradingKernel {
   readonly registry?: ContractRegistry;
   readonly execution: ExecutionEngine;
   readonly reconciler: Reconciler;
+  readonly gateway: PolicyGateway;
   readonly lanes: SymbolLanes;
   readonly store: EventStore;
   readonly log: Logger;
@@ -75,54 +76,6 @@ export interface TradingKernel {
   executeProposal(proposal: TradeProposal, sizing: SizingResult, risk: RiskDecision): Promise<TrackedOrder>;
 }
 
-interface VenueStack {
-  readonly venue: ExecutionVenue;
-  readonly log: Logger;
-  readonly performance: PerformanceEngine;
-  readonly ledger: TradeLedger;
-  readonly marketStore: MarketStateStore;
-}
-
-/**
- * EXACTLY-ONCE close journal for the PAPER venue: the TradeLedger's
- * `trade.closed` is the single authoritative event (PerformanceEngine
- * replays it); the performance engine records live-only without
- * persisting. Orphans (no feature snapshot) journal their PnL once.
- */
-const recordPaperClose = (
-  performance: PerformanceEngine, ledger: TradeLedger,
-  c: { decisionId?: string; pnl: number; at: number }
-): void => {
-  if (!c.decisionId) {
-    performance.recordTradeClosed(c.pnl, c.at);
-    return;
-  }
-  const rec = ledger.recordClosed(c.decisionId, c.pnl, c.at);
-  performance.recordTradeClosed(c.pnl, c.at, { persist: false });
-  if (!rec) performance.recordTradeClosed(c.pnl, c.at);
-};
-
-/** Live venue selection: CoinDCX stack, or the paper simulator. */
-const buildBroker = (
-  parts: VenueStack
-): {
-  client?: CoinDCXClient;
-  broker: IExecutionBroker;
-  router?: SymbolRouter;
-  registry?: ContractRegistry;
-  crossVenueGate?: (symbol: string) => Promise<{ readonly tradable: boolean; readonly reasons: readonly string[] }>;
-} => {
-  const { venue, log, performance, ledger, marketStore } = parts;
-  if (venue === 'coindcx') return buildCoinDCXStack(log, marketStore);
-  log.info('execution venue: paper');
-  return {
-    broker: new PaperExecutionBroker({
-      initialBalance: Number(process.env.PAPER_INITIAL_FUTURES_BALANCE ?? 10_000),
-      onClose: (c): void => recordPaperClose(performance, ledger, c),
-    }),
-  };
-};
-
 interface KernelParts {
   readonly provider: BinanceMarketDataProvider;
   readonly limits: RiskLimits;
@@ -138,6 +91,7 @@ interface KernelParts {
   readonly marketStore: MarketStateStore;
   readonly fills: FillsLedger;
   readonly streams: KernelStreams;
+  readonly registerPendingSnapshot: (snapshot: TradeFeatureSnapshot) => void;
   readonly crossVenueGate?: (symbol: string) => Promise<{
     readonly tradable: boolean;
     readonly reasons: readonly string[];
@@ -163,20 +117,6 @@ interface KernelContext {
   }>;
 }
 
-/**
- * EXACTLY-ONCE close fan-out for the LIVE venue: each lot allocation
- * feeds the learning ledger (which persists the authoritative
- * `trade.closed`) and the performance engine (live-only record; the
- * journal event is folded on replay). Orphans journal their PnL once.
- */
-const recordLiveClose = (
-  performance: PerformanceEngine, ledger: TradeLedger, a: PositionCloseAllocation
-): void => {
-  const rec = ledger.recordClosed(a.decisionId, a.pnl, a.at);
-  performance.recordTradeClosed(a.pnl, a.at, { persist: false });
-  if (!rec) performance.recordTradeClosed(a.pnl, a.at);
-};
-
 /** Construct + hydrate the durable state layers, then pick the venue. */
 const buildKernelContext = (
   venue: ExecutionVenue,
@@ -197,7 +137,7 @@ const buildKernelContext = (
   const fills = new FillsLedger(
     store, venue,
     venue === 'coindcx'
-      ? (a: PositionCloseAllocation): void => recordLiveClose(performance, ledger, a)
+      ? (a): void => recordLiveClose(performance, ledger, a)
       : undefined
   );
   fills.hydrate();
@@ -210,14 +150,23 @@ const buildKernelContext = (
 };
 
 /** Fail-safe hydrate + defense-in-depth submission gate. */
-const installSafetyGates = (parts: KernelParts): void => {
+const installSafetyGates = (
+  parts: KernelParts,
+  pendingSnapshots: Map<string, TradeFeatureSnapshot>
+): void => {
   // Restart truth: rebuild tracked orders (incl. UNKNOWN) from the event
   // log so the reconciler converges instead of forgetting live orders.
   parts.execution.hydrate();
-  // Execution quality + live PnL attribution: every fill delta flows
-  // through the ledger (submit path AND reconciler fold).
+  // Confirmed-fill-based learning: persist trade.opened on first fill delta.
   parts.execution.setFillHook((tracked, at): void => {
     parts.fills.record(tracked, at);
+    if (tracked.intentType === 'ENTRY' && tracked.filledQuantity > 0) {
+      const snap = pendingSnapshots.get(tracked.intentId);
+      if (snap) {
+        parts.ledger.recordOpened(snap);
+        pendingSnapshots.delete(tracked.intentId);
+      }
+    }
   });
   // Unknown/unreadable state stays HALTED (fail-safe default).
   parts.killSwitch.hydrate();
@@ -228,15 +177,20 @@ const installSafetyGates = (parts: KernelParts): void => {
   );
 };
 
-const buildParts = (ctx: KernelContext, log: Logger): KernelParts => {
+const buildResyncAccount = (ctx: KernelContext) => async (): Promise<void> => {
+  const [positions, balances] = await Promise.all([
+    ctx.broker.getPositions(), ctx.broker.getBalances(),
+  ]);
+  ctx.accountCache.syncSnapshot(positions, balances, Date.now());
+};
+
+const buildParts = (
+  ctx: KernelContext,
+  log: Logger,
+  registerPendingSnapshot: (snapshot: TradeFeatureSnapshot) => void
+): KernelParts => {
   const limits = loadRiskLimits();
   const provider = new BinanceMarketDataProvider(binanceClient);
-  const resyncAccount = async (): Promise<void> => {
-    const [positions, balances] = await Promise.all([
-      ctx.broker.getPositions(), ctx.broker.getBalances(),
-    ]);
-    ctx.accountCache.syncSnapshot(positions, balances, Date.now());
-  };
   return {
     killSwitch: new KillSwitch(ctx.store),
     ledger: ctx.ledger,
@@ -250,10 +204,11 @@ const buildParts = (ctx: KernelContext, log: Logger): KernelParts => {
     specFor: buildSpecFor(ctx),
     marketStore: ctx.marketStore,
     fills: ctx.fills,
+    registerPendingSnapshot,
     streams: buildStreams({
       audit: ctx.store, provider, log, venue: ctx.venue,
       marketStore: ctx.marketStore, accountCache: ctx.accountCache,
-      coindcxClient: ctx.coindcxClient, resyncAccount,
+      coindcxClient: ctx.coindcxClient, resyncAccount: buildResyncAccount(ctx),
     }),
     portfolio: buildPortfolio({
       broker: ctx.broker, router: ctx.router,
@@ -262,27 +217,46 @@ const buildParts = (ctx: KernelContext, log: Logger): KernelParts => {
   };
 };
 
+const buildGateway = (parts: KernelParts): PolicyGateway =>
+  new PolicyGateway({
+    limits: parts.limits,
+    portfolio: parts.portfolio,
+    execution: parts.execution,
+    reservations: parts.reservations,
+    specFor: parts.specFor,
+    store: parts.store,
+    isTradingAllowed: (): { readonly allowed: boolean; readonly reason?: string } =>
+      parts.killSwitch.halted
+        ? { allowed: false, reason: `kill switch HALTED: ${parts.killSwitch.currentReason}` }
+        : { allowed: true },
+    crossVenueGate: parts.crossVenueGate,
+    strategyGate: buildStrategyGate(parts.strategies),
+    registerPendingSnapshot: parts.registerPendingSnapshot,
+  });
+
 export const createKernel = (venueOverride?: ExecutionVenue): TradingKernel => {
   const log = createLogger('kernel');
   const venue: ExecutionVenue =
     venueOverride ?? (process.env.EXECUTION_VENUE as ExecutionVenue | undefined) ?? 'paper';
   const store = new EventStore({ durable: venue === 'coindcx' });
+  const pendingSnapshots = new Map<string, TradeFeatureSnapshot>();
 
   const ctx = buildKernelContext(venue, store, log);
-  const parts = buildParts(ctx, log);
-  installSafetyGates(parts);
-  const reconciler = new Reconciler(ctx.broker, parts.execution, parts.store);
+  const parts = buildParts(ctx, log, (s) => pendingSnapshots.set(s.decisionId, s));
+  installSafetyGates(parts, pendingSnapshots);
+  const reconciler = new Reconciler(ctx.broker, parts.execution, parts.store, parts.reservations);
   const deps = buildPipelineDeps(parts, ollamaClient, ctx.router, ctx.broker);
   const assess = (proposal: TradeProposal, state: MarketState): Promise<AssessResult> =>
     assessProposal(deps, proposal, state);
   const executor = deps.execute as NonNullable<typeof deps.execute>;
+  const gateway = buildGateway(parts);
 
   return {
     venue, provider: parts.provider, broker: ctx.broker, router: ctx.router,
     limits: parts.limits,
     portfolio: parts.portfolio, performance: ctx.performance,
     reservations: parts.reservations, registry: ctx.registry,
-    execution: parts.execution, reconciler, killSwitch: parts.killSwitch,
+    execution: parts.execution, reconciler, gateway, killSwitch: parts.killSwitch,
     ledger: ctx.ledger, strategies: ctx.strategies,
     marketStore: parts.marketStore, accountCache: ctx.accountCache,
     fills: parts.fills,

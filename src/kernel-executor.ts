@@ -30,17 +30,18 @@ interface SubmitArgs {
   readonly proposal: TradeProposal;
   readonly sizing: SizingResult;
   readonly risk: RiskDecision;
+  readonly reservationId?: string;
 }
 
 const registerAndSubmit = (
   execution: ExecutionEngine,
   args: SubmitArgs
 ): Promise<TrackedOrder> => {
-  const { pair, proposal, sizing, risk } = args;
+  const { pair, proposal, sizing, risk, reservationId } = args;
   const side = proposal.direction === 'LONG' ? 'buy' : 'sell';
   execution.registerApproved({
     intentId: risk.decisionId, pair, symbol: proposal.symbol,
-    side, quantity: sizing.quantity,
+    side, quantity: sizing.quantity, reservationId,
   });
   return execution.submit(risk.decisionId, {
     pair, side, orderType: 'market_order',
@@ -70,12 +71,12 @@ export const buildExecutor = (
   execution: ExecutionEngine
 ): KernelExecutor => {
   const log = createLogger('executor');
-  return async (proposal, sizing, risk, _reservationId): Promise<TrackedOrder> => {
+  return async (proposal, sizing, risk, reservationId): Promise<TrackedOrder> => {
     const pair = await resolvePair(broker, router, proposal.symbol);
     if (broker instanceof PaperExecutionBroker) broker.setMarkPrice(pair, proposal.entry);
     log.info('submitting approved entry', {
       symbol: proposal.symbol, pair, decisionId: risk.decisionId,
     });
-    return registerAndSubmit(execution, { pair, proposal, sizing, risk });
+    return registerAndSubmit(execution, { pair, proposal, sizing, risk, reservationId });
   };
 };

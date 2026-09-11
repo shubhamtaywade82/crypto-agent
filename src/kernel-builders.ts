@@ -15,8 +15,9 @@ import type { PortfolioStateStore } from './engines/portfolio-state-store.js';
 import type { MarketStateStore } from './engines/market-state-store.js';
 import type { PipelineDeps, StrategyRequest } from './engines/pipeline.js';
 import { evidenceEnabled, getMiEvidenceCache } from './engines/mi-evidence-cache.js';
+import { evidenceGateEnabled, verdictForSetup } from './engines/mi-evidence-gate.js';
 import type { StrategyRegistry } from './learning/strategy-registry.js';
-import type { TradeLedger } from './learning/trade-ledger.js';
+import type { TradeLedger, TradeFeatureSnapshot } from './learning/trade-ledger.js';
 import type { ContractRegistry } from './infrastructure/coindcx/contract-registry.js';
 import type { IExecutionBroker } from './infrastructure/broker/broker.js';
 import { BinanceMarketDataProvider } from './infrastructure/binance/market-data-provider.js';
@@ -105,6 +106,7 @@ export interface PipelineParts {
     readonly tradable: boolean;
     readonly reasons: readonly string[];
   }>;
+  readonly registerPendingSnapshot?: (snapshot: TradeFeatureSnapshot) => void;
 }
 
 const buildAnalyze = (ollama: OllamaClient) =>
@@ -122,6 +124,16 @@ const defaultEvidence = (parts: PipelineParts): PipelineDeps['getEvidence'] =>
     )
     : undefined;
 
+const buildEvidenceGate = (parts: PipelineParts): PipelineDeps['evidenceGate'] => {
+  if (!evidenceGateEnabled()) return undefined;
+  const deps = { provider: parts.provider, marketStore: parts.marketStore };
+  return async (symbol: string, setupType: string) => {
+    const snap = await getMiEvidenceCache().getOrRefresh(deps, symbol);
+    const verdict = verdictForSetup(snap, setupType);
+    return { allowed: verdict.allowed, reason: verdict.reason };
+  };
+};
+
 export const buildPipelineDeps = (
   parts: PipelineParts,
   ollama: OllamaClient,
@@ -138,5 +150,7 @@ export const buildPipelineDeps = (
   strategize: (r: StrategyRequest): Promise<StrategyOutcome> => strategize(ollama, defaultModel, r),
   challenge: (p: TradeProposal, s: MarketState): Promise<ChallengerVerdict> =>
     challengeProposal(ollama, defaultModel, p, s),
-  execute: buildExecutor(broker, router, parts.execution), getEvidence: defaultEvidence(parts),
+  execute: buildExecutor(broker, router, parts.execution),
+  getEvidence: defaultEvidence(parts), evidenceGate: buildEvidenceGate(parts),
+  registerPendingSnapshot: parts.registerPendingSnapshot,
 });

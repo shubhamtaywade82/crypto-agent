@@ -130,14 +130,14 @@ describe('Pipeline strategy-cell gate (V3.1 P0-5)', () => {
     return { strategyGate: gate, store: store as unknown as PipelineDeps['store'] };
   };
 
-  it('allows when no gate is installed (bootstrap / dry pipelines)', () => {
+  it('allows when no gate is installed (bootstrap / dry pipelines)', async () => {
     const deps = depsWith(undefined);
-    expect(strategyCellStage(deps as PipelineDeps, {} as never, {
+    await expect(strategyCellStage(deps as PipelineDeps, {} as never, {
       setupType: 'PULLBACK_RECLAIM',
-    } as never, 'TREND_UP')).toBe(true);
+    } as never, 'TREND_UP')).resolves.toBe(true);
   });
 
-  it('rejects and audits cells the research gate did not approve', () => {
+  it('rejects and audits cells the research gate did not approve', async () => {
     const deps = depsWith(
       (strategyId: string, setupType: string, regime: string) => {
         void strategyId;
@@ -147,10 +147,10 @@ describe('Pipeline strategy-cell gate (V3.1 P0-5)', () => {
       }
     );
     const trace = { symbol: 'BTCUSDT' };
-    const approved = strategyCellStage(deps as PipelineDeps, trace as never, {
+    const approved = await strategyCellStage(deps as PipelineDeps, trace as never, {
       setupType: 'PULLBACK_RECLAIM',
     } as never, 'TREND_UP');
-    const blocked = strategyCellStage(deps as PipelineDeps, trace as never, {
+    const blocked = await strategyCellStage(deps as PipelineDeps, trace as never, {
       setupType: 'SR_BREAK',
     } as never, 'RANGE');
     expect(approved).toBe(true);

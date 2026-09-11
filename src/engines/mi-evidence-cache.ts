@@ -65,6 +65,14 @@ export class MiEvidenceCache {
     return job;
   }
 
+  async getOrRefresh(
+    deps: EvidenceDeps,
+    symbol: string,
+    tf: Timeframe = evidenceStudyTf()
+  ): Promise<EvidenceSnapshot | undefined> {
+    return this.peek(symbol, tf) ?? await this.refresh(deps, symbol, tf);
+  }
+
   async blockFor(
     deps: EvidenceDeps,
     symbol: string,
@@ -72,7 +80,7 @@ export class MiEvidenceCache {
     tf: Timeframe = evidenceStudyTf()
   ): Promise<string | undefined> {
     if (!evidenceEnabled()) return undefined;
-    const snap = this.peek(symbol, tf) ?? await this.refresh(deps, symbol, tf);
+    const snap = await this.getOrRefresh(deps, symbol, tf);
     if (!snap) return undefined;
     return formatEvidenceBlock(pickEvidenceResults(snap, eventTypes));
   }

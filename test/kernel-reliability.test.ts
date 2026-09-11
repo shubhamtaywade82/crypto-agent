@@ -91,7 +91,8 @@ describe('Reliability — kill -9 restart: tracked orders survive via hydration'
     engineB.hydrate();
     const revived = engineB.get('d-crash');
     expect(revived).toBeDefined();
-    expect(revived?.status).toBe('SUBMITTING'); // restored exactly as left
+    // V3.2 P0-3: in-flight submission crash is revived as UNKNOWN so Reconciler queries venue truth
+    expect(revived?.status).toBe('UNKNOWN');
     expect(engineB.listOpen()).toHaveLength(1);
 
     // Reconciler converges the revived order against broker truth.
@@ -100,13 +101,11 @@ describe('Reliability — kill -9 restart: tracked orders survive via hydration'
     const report = await reconciler.reconcile();
     expect(report.checked).toBeGreaterThanOrEqual(1);
     const after = engineB.get('d-crash')!;
-    // Paper venue answers NOT_FOUND; the missing-order policy needs two
-    // consecutive affirmative answers, so a single pass may still HOLD.
-    expect(['SUBMITTING', 'CANCELLED', 'FILLED', 'POSITION_OPEN', 'SUBMITTED'])
+    expect(['UNKNOWN', 'CANCELLED', 'FILLED', 'POSITION_OPEN', 'SUBMITTED'])
       .toContain(after.status);
     await reconciler.reconcile(); // second pass: policy may now apply
     const settled = engineB.get('d-crash')!;
-    expect(['CANCELLED', 'SUBMITTING', 'FILLED', 'POSITION_OPEN', 'SUBMITTED'])
+    expect(['CANCELLED', 'UNKNOWN', 'FILLED', 'POSITION_OPEN', 'SUBMITTED'])
       .toContain(settled.status);
   });
 

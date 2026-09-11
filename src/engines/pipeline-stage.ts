@@ -140,8 +140,7 @@ const recordTradeOpened = (
   ctx: ApprovedCtx
 ): void => {
   const { proposal, sizing, risk, state } = ctx;
-  if (!deps.ledger) return;
-  deps.ledger.recordOpened({
+  const snapshot = {
     decisionId: risk.decisionId,
     symbol: proposal.symbol,
     strategyId: proposal.setupType,
@@ -157,7 +156,12 @@ const recordTradeOpened = (
     notional: sizing.notional,
     confidence: proposal.confidence,
     openedAt: Date.now(),
-  });
+  };
+  if (deps.registerPendingSnapshot) {
+    deps.registerPendingSnapshot(snapshot);
+  } else if (deps.ledger) {
+    deps.ledger.recordOpened(snapshot);
+  }
 };
 
 /** Cross-venue gate: reject with audited reasons when venues disagree too much. */
@@ -200,7 +204,10 @@ const proceedToExecution = async (
         order: { intentId: risk.decisionId, status: order.status, orderId: order.orderId },
       };
     } catch (err) {
-      deps.reservations?.release(reserved.reservationId ?? '', 'RELEASED_EXECUTION_ERROR');
+      const tracked = deps.execution?.get(risk.decisionId);
+      if (!tracked || tracked.status !== 'UNKNOWN') {
+        deps.reservations?.release(reserved.reservationId ?? '', 'RELEASED_EXECUTION_ERROR');
+      }
       throw err;
     }
   }
@@ -209,24 +216,38 @@ const proceedToExecution = async (
   return { ...assessed, challenge, status: 'APPROVED' };
 };
 
-/** Strategy-cell gate: only research-approved cells may risk capital. */
-export const strategyCellStage = (
+const auditReject = (
+  deps: PipelineDeps,
+  trace: PipelineTrace,
+  type: string,
+  payload: Record<string, unknown>
+): false => {
+  deps.store.append({ type, symbol: trace.symbol, payload });
+  return false;
+};
+
+/** Strategy + empirical-evidence gates before sizing. */
+export const strategyCellStage = async (
   deps: PipelineDeps,
   trace: PipelineTrace,
   proposal: TradeProposal,
   regime: string
-): boolean => {
-  if (!deps.strategyGate) return true;
-  const verdict = deps.strategyGate(proposal.setupType, proposal.setupType, regime);
-  if (verdict.allowed) return true;
-  deps.store.append({
-    type: 'strategy.cell_rejected', symbol: trace.symbol,
-    payload: {
-      strategyId: proposal.setupType, cell: `${proposal.setupType}|${regime}`,
-      reason: verdict.reason ?? 'cell not approved',
-    },
+): Promise<boolean> => {
+  if (deps.strategyGate) {
+    const cell = deps.strategyGate(proposal.setupType, proposal.setupType, regime);
+    if (!cell.allowed) {
+      return auditReject(deps, trace, 'strategy.cell_rejected', {
+        strategyId: proposal.setupType, cell: `${proposal.setupType}|${regime}`,
+        reason: cell.reason ?? 'cell not approved',
+      });
+    }
+  }
+  if (!deps.evidenceGate) return true;
+  const ev = await deps.evidenceGate(trace.symbol, proposal.setupType);
+  if (ev.allowed) return true;
+  return auditReject(deps, trace, 'evidence.rejected', {
+    setupType: proposal.setupType, reason: ev.reason ?? 'evidence gate',
   });
-  return false;
 };
 
 /**
@@ -249,7 +270,7 @@ export const stageExecution = async (
   const staged: PipelineTrace = { ...trace, proposal };
 
   // Research gate: ACTIVE strategy AND approved (setup × regime) cell.
-  if (!strategyCellStage(deps, staged, proposal, state.regime)) {
+  if (!(await strategyCellStage(deps, staged, proposal, state.regime))) {
     return { ...staged, status: 'REJECTED' };
   }
 

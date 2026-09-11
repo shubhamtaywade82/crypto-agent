@@ -123,16 +123,18 @@ const runApprovedIntent = async (args: ExecuteIntentArgs): Promise<Record<string
     invalidation: 'as approved',
     setupType: 'APPROVED_INTENT',
   });
-  const assessed = await kernel.assess(proposal, mtf.state);
-  if (!assessed.risk.approved) {
-    return { executed: false, reason: 're-assessment rejected', decision: assessed.risk };
+  const pair = kernel.router && kernel.broker.id === 'coindcx'
+    ? (await kernel.router.resolve(symbol)).pair
+    : `B-${symbol.replace(/USDT$/, '')}_USDT`;
+  const result = await kernel.gateway.execute(proposal, mtf.state, pair);
+  if (!result.ok) {
+    return { executed: false, reason: result.reasons?.join(', ') ?? result.status, decision: result.risk };
   }
-  const order = await kernel.executeProposal(proposal, assessed.sizing, assessed.risk);
   return {
     executed: true,
-    intentId: assessed.risk.decisionId,
-    status: order.status,
-    orderId: order.orderId,
+    intentId: result.intent.intentId,
+    status: result.status,
+    orderId: result.order.orderId,
   };
 };
 

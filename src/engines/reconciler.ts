@@ -2,6 +2,7 @@ import type {
   BrokerLookupResult, BrokerOrder, BrokerPosition, IExecutionBroker,
 } from '../infrastructure/broker/broker.js';
 import type { ExecutionEngine, TrackedOrder } from './execution-engine.js';
+import type { RiskReservationManager } from './risk-reservations.js';
 import { canTransition } from '../domain/orders/order-state.js';
 import type { EventStore } from '../infrastructure/events/event-store.js';
 import type { Logger } from '../infrastructure/observability/logger.js';
@@ -48,6 +49,7 @@ export class Reconciler {
   private readonly broker: IExecutionBroker;
   private readonly execution: ExecutionEngine;
   private readonly store: EventStore;
+  private readonly reservations?: RiskReservationManager;
   private readonly log: Logger;
   private timer?: NodeJS.Timeout;
 
@@ -55,12 +57,13 @@ export class Reconciler {
     broker: IExecutionBroker,
     execution: ExecutionEngine,
     store: EventStore,
-    log?: Logger
+    reservations?: RiskReservationManager
   ) {
     this.broker = broker;
     this.execution = execution;
     this.store = store;
-    this.log = log ?? createLogger('reconciler');
+    this.reservations = reservations;
+    this.log = createLogger('reconciler');
   }
 
   start(intervalMs = RECONCILE_INTERVAL_MS): void {
@@ -156,11 +159,19 @@ export class Reconciler {
       return;
     }
     if (tracked.status === 'SUBMITTING') {
-      ctx.details.push(`${tracked.intentId}: SUBMITTING, skipped this cycle`);
-      return;
+      if (Date.now() - tracked.updatedAt > 10_000) {
+        this.execution.transition(tracked, 'UNKNOWN');
+        ctx.details.push(`${tracked.intentId}: SUBMITTING timed out -> UNKNOWN`);
+      } else {
+        ctx.details.push(`${tracked.intentId}: SUBMITTING, skipped this cycle`);
+        return;
+      }
     }
     if (canTransition(tracked.status, 'CANCELLED')) {
       this.execution.transition(tracked, 'CANCELLED');
+      if (tracked.reservationId && this.reservations) {
+        this.reservations.release(tracked.reservationId, 'RECONCILED_MISSING');
+      }
       ctx.counters.repaired++;
       ctx.details.push(`${tracked.intentId}: confirmed missing broker-side -> CANCELLED`);
     }
@@ -176,6 +187,10 @@ export class Reconciler {
       ctx.details.push(`${tracked.intentId}: ${tracked.status} -> ${remote.status}`);
       this.execution.applyBrokerUpdate(tracked, remote);
       ctx.counters.resolved++;
+    }
+    if ((remote.status === 'FILLED' || tracked.status === 'POSITION_OPEN') &&
+        tracked.reservationId && this.reservations) {
+      this.reservations.commit(tracked.reservationId);
     }
     // A confirmed fill with a live position behind it advances to POSITION_OPEN.
     if (remote.status === 'FILLED' && ctx.positionsAvailable &&
