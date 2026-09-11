@@ -34,6 +34,9 @@ const pad = (v: string, n: number): string => v.padEnd(n);
 export const LiveLtpTable = (): React.JSX.Element => {
   useLiveTick();
   const symbols = useMemo(() => kernelWatchSymbols(), []);
+  const traded = useMemo(() => new Set(
+    (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT').split(',').map((s) => s.trim().toUpperCase())
+  ), []);
 
   return (
     <Box flexDirection="column">
@@ -46,11 +49,12 @@ export const LiveLtpTable = (): React.JSX.Element => {
       </Text>
       {symbols.map((sym) => {
         const q = liveQuote(sym);
-        const status = q.live ? '● LIVE' : q.ltp !== undefined ? '○ STALE' : '… WAIT';
-        const statusColor = q.live ? 'green' : q.ltp !== undefined ? 'yellow' : 'gray';
+        const isAnchor = sym === 'BTCUSDT' && !traded.has('BTCUSDT');
+        const status = isAnchor ? '● ANCHOR' : q.live ? '● LIVE' : q.ltp !== undefined ? '○ STALE' : '… WAIT';
+        const statusColor = isAnchor ? 'cyan' : q.live ? 'green' : q.ltp !== undefined ? 'yellow' : 'gray';
         return (
           <Text key={sym} wrap="truncate">
-            <Text bold>{pad(sym, 10)}</Text>
+            <Text bold color={isAnchor ? 'yellow' : undefined}>{pad(sym, 10)}</Text>
             <Text color="white">{pad(q.ltp !== undefined ? fmtPrice(q.ltp) : '—', 14)}</Text>
             <Text color="green">{pad(q.bid !== undefined ? fmtPrice(q.bid) : '—', 14)}</Text>
             <Text color="red">{pad(q.ask !== undefined ? fmtPrice(q.ask) : '—', 14)}</Text>

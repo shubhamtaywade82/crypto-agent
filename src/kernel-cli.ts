@@ -5,7 +5,7 @@ if (!process.argv.includes('--headless') && !process.argv.includes('--daemon') &
 import { bootEventCouncil } from './engines/event-council.js';
 import { getKernel } from './kernel.js';
 
-const SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT')
+const SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT')
   .split(',')
   .map((s) => s.trim().toUpperCase())
   .filter(Boolean);

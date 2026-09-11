@@ -35,7 +35,7 @@ export interface StreamBuildArgs {
 
 /** Symbols the kernel WS + pipeline track (shared with the TUI dashboard). */
 export const kernelWatchSymbols = (): string[] => {
-  const kernelSyms = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT')
+  const kernelSyms = (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT')
     .split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
   const watchSyms = (process.env.WATCHLIST ?? '')
     .split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);

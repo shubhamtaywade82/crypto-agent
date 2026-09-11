@@ -7,7 +7,7 @@ import { createLiveHooks, type AgentStep, type ChatMessage } from './chat-shared
 import type { PipelineTrace } from '../engines/pipeline.js';
 import { pipelineToEntries, type TranscriptEntry } from './transcript.js';
 
-const DEFAULT_SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT,SOLUSDT').split(',').map((s) => s.trim().toUpperCase());
+const DEFAULT_SYMBOLS = (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT').split(',').map((s) => s.trim().toUpperCase());
 
 export const formatTrace = (symbol: string, trace: Awaited<ReturnType<TradingKernel['runPipeline']>>): string => {
   const setups = trace.setups.length ? trace.setups.map((s) => `${s.type} RR${s.rr.toFixed(1)}`).join(', ') : 'none';

@@ -52,7 +52,7 @@ export const useShellState = (_exit: () => void): {
   readonly pushActivity: (text: string) => void;
   readonly spinner: string;
 } => {
-  const defaultSym = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT').split(',')[0]?.trim().toUpperCase() ?? 'BTCUSDT';
+  const defaultSym = (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT').split(',')[0]?.trim().toUpperCase() ?? 'SOLUSDT';
   const [mode, setMode] = useState<'ops' | 'chat'>('ops');
   const [focusSymbol, setFocusSymbol] = useState(defaultSym);
   const [auto, setAuto] = useState({ enabled: true, interval: 300 });

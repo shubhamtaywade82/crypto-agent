@@ -130,7 +130,7 @@ const usePipelineIngest = (
 };
 
 export const useConsoleState = (_exit: () => void): ConsoleState => {
-  const defaultSym = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT').split(',')[0]?.trim().toUpperCase() ?? 'BTCUSDT';
+  const defaultSym = (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT').split(',')[0]?.trim().toUpperCase() ?? 'SOLUSDT';
   const [focusSymbol, setFocusSymbol] = useState(defaultSym);
   const [auto, setAuto] = useState({ enabled: true, interval: 300 });
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
