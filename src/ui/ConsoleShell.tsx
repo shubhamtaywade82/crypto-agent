@@ -81,6 +81,7 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
       <WorkspaceRouter
         activeTab={nav.activeTab} selectedIndex={nav.selectedIndex} activeModal={nav.activeModal}
         closeModal={nav.closeModal} positions={positions} timeline={timeline} focusSymbol={s.focusSymbol}
+        opportunities={s.opportunities}
       />
       <ConsoleInput
         value={inputVal} busy={s.chat.isBusy} focused={nav.commandMode || inputVal.length > 0}

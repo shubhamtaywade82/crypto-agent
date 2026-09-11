@@ -60,7 +60,7 @@ export const useShellState = (_exit: () => void): {
   const { activity, pushActivity, setActivity } = useActivityLog();
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
   const history = useMemo(() => new PromptHistory(), []);
-  const chat = useAgentChat(orchestrator, pushActivity, noopMany, noopOne);
+  const chat = useAgentChat(orchestrator, pushActivity, noopMany, noopOne, undefined);
   const streamLive = useStreamBoot();
   useAutoScan(auto.enabled, auto.interval, chat.runKernelScan, chat.isBusy);
   const port = usePortfolio(orchestrator);

@@ -8,6 +8,10 @@ import { useAutoScan, useStreamBoot } from './use-app-boot.js';
 import {
   agentEntry, systemEntry, type TranscriptEntry, userEntry,
 } from './transcript.js';
+import {
+  mergeScanOpportunities, opportunitiesFromTrace, type ScanOpportunity,
+} from './scan-opportunities.js';
+import type { PipelineTrace } from '../engines/pipeline.js';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 
@@ -69,12 +73,15 @@ export interface ConsoleState {
   readonly history: PromptHistory;
   readonly watchCount: number;
   readonly spinner: string;
+  readonly opportunities: readonly ScanOpportunity[];
+  readonly clearOpportunities: () => void;
 }
 
 export const useConsoleState = (_exit: () => void): ConsoleState => {
   const defaultSym = (process.env.KERNEL_SYMBOLS ?? 'BTCUSDT').split(',')[0]?.trim().toUpperCase() ?? 'BTCUSDT';
   const [focusSymbol, setFocusSymbol] = useState(defaultSym);
   const [auto, setAuto] = useState({ enabled: true, interval: 300 });
+  const [opportunities, setOpportunities] = useState<ScanOpportunity[]>([]);
   const orchestrator = useMemo(() => new WatchOrchestrator(), []);
   const history = useMemo(() => new PromptHistory(), []);
   const { transcript, pushTranscript, appendMany, clearTranscript, watchCount } = useTranscriptBuffer(orchestrator);
@@ -83,7 +90,11 @@ export const useConsoleState = (_exit: () => void): ConsoleState => {
     pushTranscript(systemEntry('Activity', [text]));
   }, [pushTranscript]);
 
-  const chat = useAgentChat(orchestrator, onActivity, appendMany, pushTranscript);
+  const ingestTrace = useCallback((_symbol: string, trace: PipelineTrace): void => {
+    setOpportunities((prev) => mergeScanOpportunities(prev, opportunitiesFromTrace(_symbol, trace)));
+  }, []);
+
+  const chat = useAgentChat(orchestrator, onActivity, appendMany, pushTranscript, ingestTrace);
   const streamLive = useStreamBoot();
   useAutoScan(auto.enabled, auto.interval, chat.runKernelScan, chat.isBusy);
   const port = usePortfolio(orchestrator);
@@ -92,7 +103,8 @@ export const useConsoleState = (_exit: () => void): ConsoleState => {
   return {
     transcript, pushTranscript, appendMany, clearTranscript,
     focusSymbol, setFocusSymbol, auto, setAuto, streamLive, port, chat,
-    orchestrator, history, watchCount, spinner,
+    orchestrator, history, watchCount, spinner, opportunities,
+    clearOpportunities: (): void => setOpportunities([]),
   };
 };
 
@@ -117,7 +129,7 @@ export const useConsoleSubmit = (p: ConsoleSubmitOpts): () => void =>
       input: t, focusSymbol: p.s.focusSymbol, setFocusSymbol: p.s.setFocusSymbol,
       setAuto: p.s.setAuto, chat: p.s.chat,
       pushActivity: (text) => p.s.pushTranscript(systemEntry('Command', [text])),
-      clearTranscript: p.s.clearTranscript,
+      clearTranscript: (): void => { p.s.clearTranscript(); p.s.clearOpportunities(); },
       pushTranscript: p.s.pushTranscript,
       exit: p.exit,
     })) {

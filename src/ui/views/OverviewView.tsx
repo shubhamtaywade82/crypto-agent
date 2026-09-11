@@ -3,12 +3,15 @@ import { Box, Text } from 'ink';
 import { getKernel } from '../../kernel.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import type { ActivityTimelineItem } from '../types.js';
+import type { ScanOpportunity } from '../scan-opportunities.js';
+import { OpportunityTable } from '../components/OpportunityTable.js';
 
 export interface OverviewViewProps {
   readonly selectedIndex: number;
   readonly positions: readonly BrokerPosition[];
   readonly timeline: readonly ActivityTimelineItem[];
   readonly focusSymbol: string;
+  readonly opportunities: readonly ScanOpportunity[];
 }
 
 const SubsystemsPanel = (): React.JSX.Element => {
@@ -32,30 +35,6 @@ const SubsystemsPanel = (): React.JSX.Element => {
         <Text color="gray">● Reconciler: <Text color="green">SYNCED</Text></Text>
         <Text color="gray">● Kill Switch: <Text color={ks ? 'red' : 'green'}>{ks ? 'HALTED' : 'ARMED'}</Text></Text>
       </Box>
-    </Box>
-  );
-};
-
-const OpportunityList = ({ selectedIndex }: { selectedIndex: number }): React.JSX.Element => {
-  const opps = [
-    { sym: 'BTCUSDT', setup: 'Pullback Reclaim', tf: '1h', conf: 0.78, reg: 'TREND_UP', rr: 2.8, st: 'READY' },
-    { sym: 'SOLUSDT', setup: 'Liquidity Sweep', tf: '15m', conf: 0.71, reg: 'RANGE', rr: 2.6, st: 'WATCH' },
-    { sym: 'ETHUSDT', setup: 'Breakout Retest', tf: '1h', conf: 0.68, reg: 'TREND_UP', rr: 3.1, st: 'SIZING' },
-    { sym: 'XRPUSDT', setup: 'Trend Cont.', tf: '4h', conf: 0.61, reg: 'EXPANSION', rr: 2.4, st: 'REJECT' },
-  ];
-  return (
-    <Box flexDirection="column">
-      <Text bold color="cyan">OPPORTUNITIES (Ranked by Confidence)</Text>
-      <Text color="gray">#  SYMBOL    SETUP             TF   CONF   REGIME    R:R   STATE</Text>
-      {opps.map((o, idx) => {
-        const isSel = idx === selectedIndex;
-        const color = o.st === 'REJECT' ? 'red' : o.st === 'READY' ? 'green' : 'yellow';
-        return (
-          <Text key={o.sym} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-            {isSel ? '>' : ' '} {idx + 1}  {o.sym.padEnd(9)} {o.setup.padEnd(17)} {o.tf.padEnd(4)} {o.conf.toFixed(2)}   {o.reg.padEnd(9)} {o.rr.toFixed(1)}   <Text color={isSel ? 'black' : color}>{o.st}</Text>
-          </Text>
-        );
-      })}
     </Box>
   );
 };
@@ -84,7 +63,10 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => (
   <Box flexDirection="column" gap={1} paddingX={1}>
     <SubsystemsPanel />
     <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
-    <OpportunityList selectedIndex={p.selectedIndex} />
+    <Box flexDirection="column">
+      <Text bold color="cyan">OPPORTUNITIES (from last kernel scan)</Text>
+      <OpportunityTable rows={p.opportunities} selectedIndex={p.selectedIndex} compact />
+    </Box>
     <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
     <PositionsSummary positions={p.positions} />
   </Box>

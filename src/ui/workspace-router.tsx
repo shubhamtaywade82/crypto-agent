@@ -2,6 +2,7 @@ import React from 'react';
 import { Box } from 'ink';
 import type { ActiveModal, ActivityTimelineItem, WorkspaceTab } from './types.js';
 import type { BrokerPosition } from '../infrastructure/broker/broker.js';
+import type { ScanOpportunity } from './scan-opportunities.js';
 import { OverviewView } from './views/OverviewView.js';
 import { AgentView } from './views/AgentView.js';
 import { OpportunitiesView } from './views/OpportunitiesView.js';
@@ -22,13 +23,14 @@ export interface WorkspaceRouterProps {
   readonly positions: readonly BrokerPosition[];
   readonly timeline: readonly ActivityTimelineItem[];
   readonly focusSymbol: string;
+  readonly opportunities: readonly ScanOpportunity[];
 }
 
 const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
   switch (p.activeTab) {
-    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} />;
+    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} />;
     case 'agent': return <AgentView focusSymbol={p.focusSymbol} />;
-    case 'opps': return <OpportunitiesView selectedIndex={p.selectedIndex} />;
+    case 'opps': return <OpportunitiesView selectedIndex={p.selectedIndex} opportunities={p.opportunities} />;
     case 'positions': return <PositionsView positions={p.positions} selectedIndex={p.selectedIndex} />;
     case 'orders': return <OrdersView selectedIndex={p.selectedIndex} />;
     case 'risk': return <RiskView />;
@@ -36,7 +38,7 @@ const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
     case 'learning': return <LearningView />;
     case 'events': return <EventsView timeline={p.timeline} selectedIndex={p.selectedIndex} />;
     case 'system': return <SystemView />;
-    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} />;
+    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} timeline={p.timeline} focusSymbol={p.focusSymbol} opportunities={p.opportunities} />;
   }
 };
 
