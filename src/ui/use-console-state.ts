@@ -17,6 +17,7 @@ import {
 } from './scan-opportunities.js';
 import type { PipelineTrace } from '../engines/pipeline.js';
 import type { PipelineSnapshots } from './pipeline-view.js';
+import type { WorkspaceTab } from './types.js';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
 
@@ -167,6 +168,7 @@ export interface ConsoleSubmitOpts {
   readonly setFilterQuery: (q: string) => void;
   readonly setFilterMode: (b: boolean) => void;
   readonly exit: () => void;
+  readonly setActiveTab?: (tab: WorkspaceTab) => void;
 }
 
 export const useConsoleSubmit = (p: ConsoleSubmitOpts): () => void =>
@@ -183,6 +185,7 @@ export const useConsoleSubmit = (p: ConsoleSubmitOpts): () => void =>
       clearTranscript: (): void => { p.s.clearTranscript(); p.s.clearOpportunities(); },
       pushTranscript: p.s.pushTranscript,
       exit: p.exit,
+      setActiveTab: p.setActiveTab,
     })) {
       p.s.pushTranscript(userEntry(t));
       void p.s.chat.runTurn(t).then((answer) => {

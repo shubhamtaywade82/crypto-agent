@@ -151,7 +151,7 @@ const ChatMessageItem = ({ msg }: { readonly msg: ChatMessage }): React.JSX.Elem
 
 const EmptyChatGuide = ({ historyItems }: { readonly historyItems: readonly string[] }): React.JSX.Element => (
   <Box flexDirection="column" marginY={1}>
-    <Text color="gray" italic>No chat turns in current session. Press <Text color="cyan">c</Text> to focus prompt and chat directly.</Text>
+    <Text color="gray" italic>No chat turns in current session. Type below to chat with the agent or run commands.</Text>
     {historyItems.length > 0 && (
       <Box flexDirection="column" marginTop={1}>
         <Text bold color="gray">SAVED PROMPT HISTORY (press ↑ in input area to recall):</Text>
@@ -182,7 +182,7 @@ const ChatThread = (p: {
     <Box flexDirection="column" gap={1}>
       {total > maxVisible && (
         <Text color="gray">
-          Viewing {startIdx + 1}-{startIdx + visible.length} of {total} │ ↑/k Older · ↓/j Newer · c Chat
+          Viewing {startIdx + 1}-{startIdx + visible.length} of {total} │ PgUp/Dn Scroll chat │ Type below to chat
         </Text>
       )}
       {visible.map((m) => <ChatMessageItem key={m.id} msg={m} />)}

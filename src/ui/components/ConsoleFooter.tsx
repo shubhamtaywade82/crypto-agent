@@ -8,7 +8,7 @@ export interface ConsoleFooterProps {
 }
 
 const TabsBar = ({ activeTab }: { readonly activeTab: WorkspaceTab }): React.JSX.Element => (
-  <Box gap={1} paddingX={1} borderStyle="single" borderBottom={false} borderLeft={false} borderRight={false} borderColor="gray">
+  <Box gap={1} paddingX={1}>
     {WORKSPACE_TABS.map((tab) => {
       const isActive = tab.id === activeTab;
       return (
@@ -25,9 +25,9 @@ export const ConsoleFooter = ({ activeTab, commandMode }: ConsoleFooterProps): R
     <TabsBar activeTab={activeTab} />
     <Box paddingX={1} justifyContent="space-between">
       <Text color="gray">
-        <Text color="cyan">: /</Text> Command │ <Text color="cyan">c</Text> Chat │ <Text color="cyan">Tab</Text> Pane │ <Text color="cyan">j/k</Text> Select │ <Text color="cyan">Enter</Text> Inspect │ <Text color="cyan">Esc</Text> Back │ <Text color="cyan">p</Text> Pause │ <Text color="cyan">K</Text> Kill │ <Text color="cyan">?</Text> Help │ <Text color="cyan">q</Text> Quit
+        <Text color="cyan">Tab</Text> Tabs │ <Text color="cyan">↑/↓</Text> History │ <Text color="cyan">PgUp/Dn</Text> Scroll │ <Text color="cyan">Enter</Text> Send │ <Text color="cyan">/help</Text> Cmds │ <Text color="cyan">Ctrl+P</Text> Pause │ <Text color="cyan">Ctrl+C</Text> Quit
       </Text>
-      {commandMode && <Text bold color="yellow">COMMAND MODE (:)</Text>}
+      {commandMode ? <Text bold color="yellow">COMMAND MODE</Text> : null}
     </Box>
   </Box>
 );

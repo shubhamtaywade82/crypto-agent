@@ -36,43 +36,48 @@ const usePositionsPoll = (): readonly BrokerPosition[] => {
   return positions;
 };
 
-const useConsoleNav = (s: ReturnType<typeof useConsoleState>, inputVal: string, setInputVal: (v: string) => void, exit: () => void): {
+const useConsoleNav = (
+  s: ReturnType<typeof useConsoleState>,
+  inputVal: string,
+  setInputVal: (v: string) => void,
+  exit: () => void
+): {
   readonly nav: ReturnType<typeof useTerminalNav>;
   readonly onSubmit: () => void;
 } => {
   const k = getKernel();
   const nav = useTerminalNav({
-    isBusy: s.chat.isBusy, inputHasText: inputVal.length > 0,
+    isBusy: s.chat.isBusy,
     onTogglePause: () => s.setAuto((a) => ({ ...a, enabled: !a.enabled })),
     onKillSwitch: () => { k.killSwitch.halt('Console user emergency halt', 'operator'); },
     onQuit: exit,
     onEnterInspect: (tab: WorkspaceTab) => {
       if (tab === 'opps' || tab === 'orders' || tab === 'positions') nav.openModal({ type: 'decision_trace' });
     },
-    onSlashCommand: (prefix) => { setInputVal(prefix); },
   });
   const submit = useConsoleSubmit({
     s, inputVal, setInputVal, filterMode: false,
     setFilterQuery: () => undefined, setFilterMode: () => undefined, exit,
+    setActiveTab: nav.setActiveTab,
   });
-  const onSubmit = useCallback((): void => { submit(); nav.setCommandMode(false); }, [submit, nav]);
+  const onSubmit = useCallback((): void => { submit(); }, [submit]);
   return { nav, onSubmit };
 };
 
 const useConsoleHistoryControls = (
-  nav: ReturnType<typeof useTerminalNav>,
   history: ReturnType<typeof useConsoleState>['history'],
   inputVal: string,
-  setInputVal: (v: string) => void
+  setInputVal: (v: string) => void,
+  closeModal: () => void
 ): {
   readonly onHistoryUp: () => void;
   readonly onHistoryDown: () => void;
   readonly onEscape: () => void;
 } => {
   const { handleUp, handleDown } = usePromptHistoryNavigation(history, inputVal, setInputVal);
-  const onHistoryUp = useCallback((): void => { nav.setCommandMode(true); handleUp(); }, [nav, handleUp]);
-  const onHistoryDown = useCallback((): void => { nav.setCommandMode(true); handleDown(); }, [nav, handleDown]);
-  const onEscape = useCallback((): void => { setInputVal(''); nav.setCommandMode(false); nav.closeModal(); }, [nav, setInputVal]);
+  const onHistoryUp = useCallback((): void => { handleUp(); }, [handleUp]);
+  const onHistoryDown = useCallback((): void => { handleDown(); }, [handleDown]);
+  const onEscape = useCallback((): void => { setInputVal(''); closeModal(); }, [closeModal, setInputVal]);
   return { onHistoryUp, onHistoryDown, onEscape };
 };
 
@@ -112,11 +117,11 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
   const [inputVal, setInputVal] = useState('');
   const positions = usePositionsPoll();
   const { nav, onSubmit } = useConsoleNav(s, inputVal, setInputVal, p.exit);
-  const { onHistoryUp, onHistoryDown, onEscape } = useConsoleHistoryControls(nav, s.history, inputVal, setInputVal);
+  const { onHistoryUp, onHistoryDown, onEscape } = useConsoleHistoryControls(s.history, inputVal, setInputVal, nav.closeModal);
   const k = getKernel();
   const { timeline, circuit, agentState } = useConsoleMetrics(s, k);
   const { stdout } = useStdout();
-  const h = Math.max(10, (stdout.rows || process.stdout.rows || 24) - 5);
+  const h = Math.max(8, (stdout.rows || process.stdout.rows || 24) - 6);
 
   return (
     <Box flexDirection="column" paddingX={1} gap={0} height={stdout.rows || undefined} overflow="hidden">
@@ -127,12 +132,12 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
       />
       <ConsoleWorkspaceView nav={nav} s={s} positions={positions} timeline={timeline} height={h} />
       <ConsoleInput
-        value={inputVal} busy={s.chat.isBusy} focused={nav.commandMode || inputVal.length > 0}
+        value={inputVal} busy={s.chat.isBusy} focused={!s.chat.isBusy}
         statusText={s.chat.status} spinner={s.spinner}
         onSubmit={onSubmit} onChange={setInputVal} onHistoryUp={onHistoryUp} onHistoryDown={onHistoryDown}
         onEscape={onEscape}
       />
-      <ConsoleFooter activeTab={nav.activeTab} commandMode={nav.commandMode} />
+      <ConsoleFooter activeTab={nav.activeTab} commandMode={inputVal.startsWith('/')} />
     </Box>
   );
 };

@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { PromptHistory } from '../src/ui/history.js';
+import { runCommand, type CommandCtx } from '../src/ui/app-commands.js';
+import type { WorkspaceTab } from '../src/ui/types.js';
 
 describe('PromptHistory', () => {
   const tmpFile = path.join(os.tmpdir(), `test_crypto_agent_history_${Date.now()}.txt`);
@@ -61,5 +63,65 @@ describe('PromptHistory', () => {
     hist.save('item 1');
     hist.save('item 2');
     expect(hist.getItems()).toEqual(['item 1', 'item 2']);
+  });
+});
+
+describe('runCommand', () => {
+  const makeCtx = (input: string, onTab?: (t: WorkspaceTab) => void, onAuto?: (b: boolean) => void): {
+    ctx: CommandCtx;
+    activities: string[];
+  } => {
+    const activities: string[] = [];
+    const ctx: CommandCtx = {
+      input,
+      focusSymbol: 'BTCUSDT',
+      setFocusSymbol: () => {},
+      setAuto: (arg) => {
+        if (typeof arg === 'function') {
+          const res = arg({ enabled: true, interval: 300 });
+          onAuto?.(res.enabled);
+        }
+      },
+      chat: {
+        runTurn: async () => '',
+        runPipelineTrace: async () => {},
+        runKernelScan: async () => {},
+        clearMessages: () => {},
+        addSystemNote: () => {},
+      },
+      pushActivity: (t) => activities.push(t),
+      pushTranscript: () => {},
+      clearTranscript: () => {},
+      exit: () => {},
+      setActiveTab: onTab,
+    };
+    return { ctx, activities };
+  };
+
+  it('switches tabs via /tab and /<number> commands', () => {
+    let tab: WorkspaceTab = 'overview';
+    const { ctx: c1 } = makeCtx('/tab agent', (t) => { tab = t; });
+    expect(runCommand(c1)).toBe(true);
+    expect(tab).toBe('agent');
+
+    const { ctx: c2 } = makeCtx('/3', (t) => { tab = t; });
+    expect(runCommand(c2)).toBe(true);
+    expect(tab).toBe('opps');
+
+    const { ctx: c3 } = makeCtx('/risk', (t) => { tab = t; });
+    expect(runCommand(c3)).toBe(true);
+    expect(tab).toBe('risk');
+
+    const { ctx: c4 } = makeCtx('/0', (t) => { tab = t; });
+    expect(runCommand(c4)).toBe(true);
+    expect(tab).toBe('system');
+  });
+
+  it('handles /pause command', () => {
+    let autoEnabled = true;
+    const { ctx, activities } = makeCtx('/pause', undefined, (b) => { autoEnabled = b; });
+    expect(runCommand(ctx)).toBe(true);
+    expect(autoEnabled).toBe(false);
+    expect(activities).toContain('Auto-trading PAUSED');
   });
 });

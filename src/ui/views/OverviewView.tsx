@@ -35,7 +35,9 @@ const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Elemen
     <Box flexDirection="row" marginTop={1}>
       <Box width="50%" flexDirection="column" paddingRight={1}>
         <Text bold color="yellow">Depth ({symbol})</Text>
-        {snap?.bids.length ? <DepthLadder bids={snap.bids} asks={snap.asks} /> : <Text color="gray">depth streaming…</Text>}
+        {snap?.bids.length ? (
+          <DepthLadder bids={snap.bids} asks={snap.asks} last={snap.last} mark={snap.mark} micro={snap.microstructure} />
+        ) : <Text color="gray">depth streaming…</Text>}
       </Box>
       <Box width="50%" flexDirection="column">
         <Text bold color="yellow">Tape ({symbol})</Text>
@@ -53,8 +55,6 @@ const MarketWatchPanel = ({ focusSymbol }: { readonly focusSymbol: string }): Re
     void ensureSymbolTracked(focusSymbol);
     for (const sym of symbols) void ensureSymbolTracked(sym);
   }, [focusSymbol, symbols]);
-  const micro = getKernel().marketStore.snapshot(focusSymbol)?.microstructure;
-
   return (
     <Box flexDirection="column" gap={0}>
       <LiveLtpTable />
@@ -64,11 +64,6 @@ const MarketWatchPanel = ({ focusSymbol }: { readonly focusSymbol: string }): Re
         <Text color="gray">/focus <Text bold color="yellow">{focusSymbol}</Text></Text>
       </Box>
       <DepthAndTape symbol={focusSymbol} />
-      {micro && (
-        <Text color="gray">
-          Δ ${micro.tradeDelta.toFixed(0)} │ bid depth: {micro.bidDepth.toFixed(1)} │ ask depth: {micro.askDepth.toFixed(1)} │ imb: {(micro.imbalance * 100).toFixed(0)}%
-        </Text>
-      )}
     </Box>
   );
 };
