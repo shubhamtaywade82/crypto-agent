@@ -45,7 +45,17 @@ const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Elemen
           <DepthLadder bids={snap.bids} asks={snap.asks} last={snap.last} mark={snap.mark} micro={snap.microstructure} />
         ) : <Text color="gray">depth streaming…</Text>}
       </Box>
-      <Box width="50%" flexDirection="column">
+      <Box
+        width="50%"
+        flexDirection="column"
+        borderStyle="single"
+        borderLeft={true}
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        borderColor="gray"
+        paddingLeft={1}
+      >
         <Text bold color="yellow">Tape ({symbol})</Text>
         <Text color="gray">WS aggTrade + REST refresh</Text>
         <LiveTape symbol={symbol} />
@@ -92,16 +102,28 @@ const SidebarSystemStatus = ({ streamLive, halted, circuit }: {
 const SidebarPositions = ({ positions }: { readonly positions: readonly BrokerPosition[] }): React.JSX.Element => (
   <Box flexDirection="column">
     <Text bold color="yellow">RECENT POSITIONS</Text>
-    {positions.length === 0 ? <Text color="gray" italic>None open</Text> : positions.map((pos) => {
+    {positions.length === 0 ? <Text color="gray" italic wrap="truncate">None open</Text> : positions.map((pos) => {
       const upnl = pos.unrealizedPnl ?? 0;
       const sign = upnl >= 0 ? '+' : '';
       return (
         <Text key={pos.pair} wrap="truncate">
-          {pos.pair} <Text color={pos.side === 'long' ? 'green' : 'red'}>{pos.side.toUpperCase()}</Text>
+          {pos.pair.slice(0, 9).padEnd(9)} <Text color={pos.side === 'long' ? 'green' : 'red'}>{pos.side.toUpperCase()}</Text>
           {' '}<Text color={upnl >= 0 ? 'green' : 'red'}>{sign}${upnl.toFixed(2)}</Text>
         </Text>
       );
     })}
+  </Box>
+);
+
+const SidebarPortfolio = ({ snap, limits }: {
+  readonly snap: ReturnType<typeof getKernel>['portfolio']['peek'] extends () => infer R ? R : never;
+  readonly limits: ReturnType<typeof getKernel>['limits'];
+}): React.JSX.Element => (
+  <Box flexDirection="column">
+    <Text bold color="yellow">PORTFOLIO</Text>
+    <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text></Text>
+    <Text color="gray">Today <Text color={snap.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{snap.dailyRealizedPnl >= 0 ? '+' : ''}${snap.dailyRealizedPnl.toFixed(2)}</Text></Text>
+    <Text color="gray">Pos <Text color="white">{snap.openPositions}/{limits.maxConcurrentPositions}</Text> │ Lev <Text color="white">{limits.maxLeverage}x</Text></Text>
   </Box>
 );
 
@@ -118,14 +140,21 @@ const OverviewSidebar = (p: {
   const circuit = deriveCircuitState(snap.dailyLossPercent, snap.drawdownPercent, snap.lossStreak, k.limits);
 
   return (
-    <Box flexDirection="column" width={38} flexShrink={0} gap={1}>
+    <Box
+      flexDirection="column"
+      width={38}
+      flexShrink={0}
+      gap={1}
+      borderStyle="single"
+      borderLeft={true}
+      borderRight={false}
+      borderTop={false}
+      borderBottom={false}
+      borderColor="gray"
+      paddingLeft={1}
+    >
       <SidebarSystemStatus streamLive={p.streamLive ?? false} halted={k.killSwitch.halted} circuit={circuit} />
-      <Box flexDirection="column">
-        <Text bold color="yellow">PORTFOLIO</Text>
-        <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text></Text>
-        <Text color="gray">Today <Text color={snap.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{snap.dailyRealizedPnl >= 0 ? '+' : ''}${snap.dailyRealizedPnl.toFixed(2)}</Text></Text>
-        <Text color="gray">Pos <Text color="white">{snap.openPositions}/{k.limits.maxConcurrentPositions}</Text> │ Lev <Text color="white">{k.limits.maxLeverage}x</Text></Text>
-      </Box>
+      <SidebarPortfolio snap={snap} limits={k.limits} />
       <Box flexDirection="column">
         <Text bold color="yellow">TOP OPPORTUNITIES</Text>
         <OpportunityTable rows={p.opportunities.slice(0, 4)} markets={p.markets} isScanning={p.isScanning} selectedIndex={-1} compact />
@@ -140,7 +169,7 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
   const brief = buildTraderBrief(p.focusSymbol, p.pipelineSnapshots ?? {}, p.opportunities);
 
   return (
-    <Box flexDirection="column" gap={0} paddingX={1}>
+    <Box flexDirection="column" gap={0}>
       <TraderBriefPanel brief={brief} />
       <Divider style="single" />
       <Box flexDirection="row" gap={1}>

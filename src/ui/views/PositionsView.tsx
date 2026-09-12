@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import { getKernel } from '../../kernel.js';
 
@@ -19,7 +20,7 @@ const PositionDetail = ({ p }: { readonly p: BrokerPosition }): React.JSX.Elemen
   const ledger = findLedgerTrade(p.pair);
   return (
   <Box flexDirection="column">
-    <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
+    <Divider style="single" />
     <Text bold color="yellow">SELECTED POSITION: {p.pair} ({p.side.toUpperCase()})</Text>
     <Text color="gray">├─ Strategy:     <Text color="white">{ledger?.strategyId ?? '—'}</Text></Text>
     <Text color="gray">├─ Entry Price:  <Text color="white">{p.entryPrice.toFixed(2)} USDT</Text></Text>
@@ -63,7 +64,7 @@ export const PositionsView = ({ positions, selectedIndex }: PositionsViewProps):
   const selected = positions[safeIdx];
 
   return (
-    <Box flexDirection="column" gap={1} paddingX={1}>
+    <Box flexDirection="column" gap={1}>
       <Text bold color="cyan">
         ACTIVE POSITIONS ({positions.length} OPEN / 2 MAX PERMITTED)
       </Text>

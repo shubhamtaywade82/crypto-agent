@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import { buildStrategyRows, type StrategyRow } from '../strategy-rows.js';
 
 export interface StrategiesViewProps {
@@ -40,10 +41,9 @@ export const StrategiesView = ({ selectedIndex }: StrategiesViewProps): React.JS
   const rows = useStrategyPoll();
   const safeIdx = Math.min(selectedIndex, Math.max(0, rows.length - 1));
   const selected = rows[safeIdx];
-  const rule = '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
 
   return (
-    <Box flexDirection="column" gap={1} paddingX={1}>
+    <Box flexDirection="column" gap={1}>
       <Text bold color="cyan">STRATEGY CELL RESEARCH &amp; PROMOTION CONSOLE</Text>
       {rows.length === 0 ? (
         <Text color="gray" italic>No strategies registered — ledger empty and registry not hydrated.</Text>
@@ -52,7 +52,7 @@ export const StrategiesView = ({ selectedIndex }: StrategiesViewProps): React.JS
           <StrategyTable rows={rows} safeIdx={safeIdx} />
           {selected ? (
             <>
-              <Text color="gray">{rule}</Text>
+              <Divider style="single" />
               <Text bold color="yellow">SELECTED: {selected.id} ({selected.version})</Text>
               <Text color="gray">├─ Stats: {selected.detail}</Text>
               <Text color="gray">└─ Cells: {selected.approvedCells.length ? selected.approvedCells.join(', ') : 'none yet'}</Text>

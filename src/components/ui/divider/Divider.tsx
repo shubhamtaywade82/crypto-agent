@@ -8,8 +8,9 @@ export type DividerStyle = 'single' | 'double' | 'dashed' | 'bold';
 export interface DividerProps {
   title?: string;
   style?: DividerStyle;
-  /** Defaults to terminal width */
+  /** Defaults to terminal width minus inset */
   width?: number;
+  inset?: number;
   theme?: InkUITheme;
 }
 
@@ -24,16 +25,17 @@ export const Divider: React.FC<DividerProps> = ({
   title,
   style = 'single',
   width,
+  inset = 2,
   theme = darkTheme,
 }) => {
   const { stdout } = useStdout();
-  const totalWidth = width ?? (stdout?.columns ?? 80);
+  const cols = stdout?.columns ?? process.stdout?.columns ?? 80;
+  const totalWidth = width ?? Math.max(10, cols - inset);
   const char = CHARS[style];
 
   let line: string;
 
   if (title) {
-    // ── Title ───────────────────────
     const prefix = char + char + ' ';
     const suffix = ' ';
     const remaining = totalWidth - prefix.length - title.length - suffix.length;
@@ -43,8 +45,8 @@ export const Divider: React.FC<DividerProps> = ({
   }
 
   return (
-    <Box>
-      <Text color={theme.colors.border}>{line}</Text>
+    <Box width="100%">
+      <Text wrap="truncate" color={theme.colors.border}>{line}</Text>
     </Box>
   );
 };

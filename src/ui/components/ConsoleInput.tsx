@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 
 export interface ConsoleInputProps {
   readonly value: string;
@@ -45,7 +46,7 @@ export const ConsoleInput = (p: ConsoleInputProps): React.JSX.Element => {
 
   return (
     <Box flexDirection="column" marginTop={0}>
-      <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 2))}</Text>
+      <Divider style="single" />
       <Box>
         <Text bold color={p.busy ? 'yellow' : 'cyan'}>
           {p.busy ? `${p.spinner ?? '⠋'} ` : '> '}

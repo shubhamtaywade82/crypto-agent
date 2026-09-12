@@ -20,7 +20,7 @@ const FOOTER_KEYS: readonly KeyHintItem[] = [
 ];
 
 export const TabsBar = ({ activeTab }: { readonly activeTab: WorkspaceTab }): React.JSX.Element => (
-  <Box gap={1} paddingX={1}>
+  <Box gap={1}>
     {WORKSPACE_TABS.map((tab) => {
       const isActive = tab.id === activeTab;
       return (
@@ -34,7 +34,7 @@ export const TabsBar = ({ activeTab }: { readonly activeTab: WorkspaceTab }): Re
 
 export const ConsoleFooter = ({ commandMode }: ConsoleFooterProps): React.JSX.Element => (
   <Box flexDirection="column" marginTop={0}>
-    <Box paddingX={1} justifyContent="space-between" alignItems="center">
+    <Box justifyContent="space-between" alignItems="center">
       <KeyHint keys={[...FOOTER_KEYS]} />
       {commandMode ? <Badge variant="warning">COMMAND MODE</Badge> : <Text color="gray" italic>Not financial advice.</Text>}
     </Box>

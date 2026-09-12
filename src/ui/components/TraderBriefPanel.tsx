@@ -19,7 +19,7 @@ const LevelsRow = ({ levels }: { readonly levels: TraderBrief['levels'] }): Reac
   if (levels.target !== undefined) parts.push(`TP $${levels.target.toFixed(2)}`);
   if (levels.rr !== undefined) parts.push(`RR ${levels.rr.toFixed(2)}`);
   if (parts.length === 0) return null;
-  return <Text color="gray">  Levels: <Text color="white">{parts.join(' │ ')}</Text></Text>;
+  return <Text color="gray" wrap="truncate">  Levels: <Text color="white">{parts.join(' │ ')}</Text></Text>;
 };
 
 export const TraderBriefPanel = ({ brief }: { readonly brief: TraderBrief }): React.JSX.Element => {
@@ -33,24 +33,24 @@ export const TraderBriefPanel = ({ brief }: { readonly brief: TraderBrief }): Re
         <Text bold color="cyan">TRADER BRIEF — {brief.symbol}</Text>
         <Text color="gray">MD:<Text color={freshColor}>{fresh}</Text> {brief.pipelineAge ? `· scan ${brief.pipelineAge}` : ''}</Text>
       </Box>
-      <Text>
+      <Text wrap="truncate">
         <Text bold color={stanceColor(brief.stance)}>{brief.stance}</Text>
         <Text color="gray"> │ </Text>
         <Text color="white">{brief.headline}</Text>
       </Text>
-      <Text color="gray">
+      <Text color="gray" wrap="truncate">
         Regime <Text color="white">{brief.regime}</Text> │ MTF <Text color="white">{brief.mtf}</Text>
         {brief.setup ? <> │ Setup <Text color="yellow">{brief.setup}</Text></> : null}
         {' │ '}Conf <Text color="white">{conf}</Text>
       </Text>
-      {brief.thesis ? <Text color="gray">  Thesis: <Text color="white">"{brief.thesis.slice(0, 120)}{brief.thesis.length > 120 ? '…' : ''}"</Text></Text> : null}
-      {brief.trigger ? <Text color="gray">  Trigger: <Text color="green">{brief.trigger}</Text></Text> : null}
-      {brief.invalidation ? <Text color="gray">  Invalidate: <Text color="red">{brief.invalidation}</Text></Text> : null}
+      {brief.thesis ? <Text color="gray" wrap="truncate">  Thesis: <Text color="white">"{brief.thesis.slice(0, 120)}{brief.thesis.length > 120 ? '…' : ''}"</Text></Text> : null}
+      {brief.trigger ? <Text color="gray" wrap="truncate">  Trigger: <Text color="green">{brief.trigger}</Text></Text> : null}
+      {brief.invalidation ? <Text color="gray" wrap="truncate">  Invalidate: <Text color="red">{brief.invalidation}</Text></Text> : null}
       <LevelsRow levels={brief.levels} />
-      <Text color="gray">  Risk: <Text color={brief.riskOk ? 'green' : 'red'}>{brief.riskNote}</Text></Text>
-      {brief.microNote ? <Text color="yellow">  ⚠ {brief.microNote}</Text> : null}
+      <Text color="gray" wrap="truncate">  Risk: <Text color={brief.riskOk ? 'green' : 'red'}>{brief.riskNote}</Text></Text>
+      {brief.microNote ? <Text color="yellow" wrap="truncate">  ⚠ {brief.microNote}</Text> : null}
       {brief.alternate ? (
-        <Text color="gray">
+        <Text color="gray" wrap="truncate">
           Alt watch: <Text color="cyan">{brief.alternate.symbol}</Text> {brief.alternate.direction} {brief.alternate.setup} ({brief.alternate.state}, conf {(brief.alternate.confidence * 100).toFixed(0)}%)
         </Text>
       ) : null}

@@ -92,7 +92,7 @@ export function Panel({
   const bc = borderColor ?? theme.colors.border;
 
   // Total panel width (includes the 2 border chars on each side)
-  const totalWidth: number = width === 'auto' ? termCols : (width as number);
+  const totalWidth: number = width === 'auto' ? Math.max(10, termCols - 2) : (width as number);
   // Inner width = space between left and right border chars
   const innerWidth = Math.max(4, totalWidth - 2);
 

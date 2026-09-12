@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import { getKernel } from '../../kernel.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
 import type { TrackedOrder } from '../../engines/execution-engine.js';
@@ -42,7 +43,7 @@ const OrdersTable = (p: {
 
 const FsmLifecycle = ({ selected }: { readonly selected: TrackedOrder }): React.JSX.Element => (
   <Box flexDirection="column">
-    <Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text>
+    <Divider style="single" />
     <Text bold color="yellow">FSM LIFECYCLE: {selected.intentId} ({selected.pair})</Text>
     <Box flexDirection="column" marginY={0}>
       {FSM_STEPS.map((step, idx) => {
@@ -79,7 +80,7 @@ export const OrdersView = ({ selectedIndex }: OrdersViewProps): React.JSX.Elemen
   const selected = openOrders[safeIdx];
 
   return (
-    <Box flexDirection="column" gap={1} paddingX={1}>
+    <Box flexDirection="column" gap={1}>
       <Text bold color="cyan">ORDER EXECUTION &amp; RECONCILIATION FSM</Text>
       {openOrders.length === 0 ? (
         <Text color="gray" italic>No open order intents — kernel is idle or all fills reconciled.</Text>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
 import { MarketDetail, OpportunityDetail, OpportunityTable } from '../components/OpportunityTable.js';
 
@@ -22,14 +23,14 @@ export const OpportunitiesView = (p: OpportunitiesViewProps): React.JSX.Element 
     : 'MONITORED WATCHLIST (NO ACTIVE SETUPS >= 2.5 R:R)';
 
   return (
-    <Box flexDirection="column" gap={1} paddingX={1}>
+    <Box flexDirection="column" gap={1}>
       <Text bold color="cyan">{title}</Text>
       <OpportunityTable
         rows={p.opportunities} markets={p.markets}
         isScanning={p.isScanning} selectedIndex={p.selectedIndex}
       />
-      {selOpp && <><Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text><OpportunityDetail row={selOpp} /></>}
-      {selMkt && <><Text color="gray">{'─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6))}</Text><MarketDetail market={selMkt} /></>}
+      {selOpp && <><Divider style="single" /><OpportunityDetail row={selOpp} /></>}
+      {selMkt && <><Divider style="single" /><MarketDetail market={selMkt} /></>}
     </Box>
   );
 };

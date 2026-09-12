@@ -27,13 +27,26 @@ const MarketRow = ({ m, idx, isSel, compact }: {
   const live = liveQuote(m.symbol);
   const px = live.ltp ?? m.price;
   const priceStr = px > 0 ? `$${fmtPrice(px)}` : '—';
-  const liveTag = live.live ? '' : ' *';
+  const liveTag = live.live ? '' : '*';
+  const sym = m.symbol.replace('USDT', '').slice(0, 6).padEnd(6);
+
+  if (compact) {
+    const compactPx = `${priceStr}${liveTag}`.slice(0, 10).padEnd(10);
+    const compactReg = m.regime.slice(0, 7).padEnd(7);
+    const compactTr = m.trend.slice(0, 4);
+    return (
+      <Text wrap="truncate" color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
+        {isSel ? '>' : ' '}{idx + 1} {sym} {compactPx} <Text color={isSel ? 'black' : regCol}>{compactReg}</Text> <Text color={isSel ? 'black' : trendCol}>{compactTr}</Text>
+      </Text>
+    );
+  }
+
   return (
     <Text color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-      {isSel ? '>' : ' '} {idx + 1}  {m.symbol.padEnd(10)} {`${priceStr}${liveTag}`.padEnd(compact ? 11 : 14)}
-      <Text color={isSel ? 'black' : regCol}>{m.regime.padEnd(compact ? 11 : 14)}</Text>
+      {isSel ? '>' : ' '} {idx + 1}  {m.symbol.padEnd(10)} {`${priceStr}${liveTag ? ' ' + liveTag : ''}`.padEnd(14)}
+      <Text color={isSel ? 'black' : regCol}>{m.regime.padEnd(14)}</Text>
       <Text color={isSel ? 'black' : trendCol}>{m.trend.padEnd(11)}</Text>
-      {!compact && `${String(m.setupsCount).padEnd(8)}`}
+      {String(m.setupsCount).padEnd(8)}
       <Text color={isSel ? 'black' : 'gray'}>MONITORING (0/4 passed min 2.5 R:R)</Text>
     </Text>
   );
@@ -48,22 +61,51 @@ const MonitoredMarketsTable = (p: {
   useLiveTick();
   const safeIdx = Math.min(p.selectedIndex, p.markets.length - 1);
   const header = p.compact
-    ? '   #  SYMBOL     LTP (LIVE)  REGIME     1H TREND   STATUS'
+    ? ' # SYM    LTP        REGIME  TRND'
     : '   #  SYMBOL     LTP (LIVE)     REGIME        1H TREND   SETUPS  STATUS';
   return (
     <Box flexDirection="column">
-      <Text color="gray">{header}</Text>
+      <Text color="gray" wrap="truncate">{header}</Text>
       {p.markets.map((m, idx) => (
         <MarketRow key={m.symbol} m={m} idx={idx} isSel={idx === safeIdx} compact={p.compact} />
       ))}
       {p.isScanning ? (
         <Spinner label="Scanning markets..." type="dots" />
       ) : (
-        <Text color="gray" italic>
-          {`Scanned at ${p.markets[0]?.scannedAt ?? 'recently'} │ Watching for structural triggers`}
+        <Text color="gray" italic wrap="truncate">
+          {p.compact
+            ? `Scanned ${p.markets[0]?.scannedAt ?? 'recently'}`
+            : `Scanned at ${p.markets[0]?.scannedAt ?? 'recently'} │ Watching for structural triggers`}
         </Text>
       )}
     </Box>
+  );
+};
+
+const OpportunityRow = ({ c, idx, isSel, compact }: {
+  readonly c: ScanOpportunity; readonly idx: number; readonly isSel: boolean; readonly compact?: boolean;
+}): React.JSX.Element => {
+  const dirColor = c.direction === 'LONG' ? 'green' : 'red';
+  const stColor = stateColor(c.state);
+  const sym = c.symbol.replace('USDT', '').slice(0, 5).padEnd(5);
+
+  if (compact) {
+    const setup = c.setup.slice(0, 10).padEnd(10);
+    const rr = c.rr.toFixed(1).padStart(4);
+    const st = c.state.slice(0, 5).padEnd(5);
+    return (
+      <Text key={`${c.symbol}-${c.setup}`} wrap="truncate" color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
+        {isSel ? '>' : ' '}{idx + 1} {sym} <Text color={isSel ? 'black' : dirColor}>{setup}</Text> {rr} <Text color={isSel ? 'black' : stColor}>{st}</Text>
+      </Text>
+    );
+  }
+
+  return (
+    <Text key={`${c.symbol}-${c.setup}`} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
+      {isSel ? '>' : ' '} {idx + 1}  {c.symbol.padEnd(9)} <Text color={isSel ? 'black' : dirColor}>{c.direction.padEnd(6)}</Text>
+      {` ${c.setup.padEnd(17)} ${c.tf.padEnd(4)} ${c.confidence.toFixed(2)}   ${c.regime.padEnd(10)} ${c.rr.toFixed(1)}   `}
+      <Text color={isSel ? 'black' : stColor}>{c.state}</Text>
+    </Text>
   );
 };
 
@@ -79,25 +121,15 @@ export const OpportunityTable = (p: OpportunityTableProps): React.JSX.Element =>
   }
   const safeIdx = Math.min(p.selectedIndex, p.rows.length - 1);
   const header = p.compact
-    ? '#  SYMBOL    SETUP             TF   CONF   REGIME    R:R   STATE'
+    ? ' # SYM   SETUP       R:R STATE'
     : '   #  SYMBOL    DIR    SETUP             TF   CONF   REGIME     R:R   STATE';
 
   return (
     <Box flexDirection="column">
-      <Text color="gray">{header}</Text>
-      {p.rows.map((c, idx) => {
-        const isSel = idx === safeIdx;
-        const dirColor = c.direction === 'LONG' ? 'green' : 'red';
-        const stColor = stateColor(c.state);
-        return (
-          <Text key={`${c.symbol}-${c.setup}`} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-            {isSel ? '>' : ' '} {idx + 1}  {c.symbol.padEnd(9)}
-            {!p.compact && <Text color={isSel ? 'black' : dirColor}>{c.direction.padEnd(6)}</Text>}
-            {` ${c.setup.padEnd(17)} ${c.tf.padEnd(4)} ${c.confidence.toFixed(2)}   ${c.regime.padEnd(p.compact ? 9 : 10)} ${c.rr.toFixed(1)}   `}
-            <Text color={isSel ? 'black' : stColor}>{c.state}</Text>
-          </Text>
-        );
-      })}
+      <Text color="gray" wrap="truncate">{header}</Text>
+      {p.rows.map((c, idx) => (
+        <OpportunityRow key={`${c.symbol}-${c.setup}`} c={c} idx={idx} isSel={idx === safeIdx} compact={p.compact} />
+      ))}
     </Box>
   );
 };

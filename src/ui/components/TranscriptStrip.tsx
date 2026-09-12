@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import type { TranscriptEntry } from '../transcript.js';
 import { actorColor } from '../transcript.js';
 
@@ -14,8 +15,6 @@ export interface AgentConsoleFeedProps {
   readonly scrollOffset?: number;
   readonly autoScroll?: boolean;
 }
-
-const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
 
 const TranscriptLines = ({ entries }: { readonly entries: readonly TranscriptEntry[] }): React.JSX.Element => (
   <>
@@ -59,7 +58,7 @@ export const TranscriptStrip = ({ entries, limit = 3 }: TranscriptStripProps): R
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color="gray">{rule()}</Text>
+      <Divider style="single" />
       <Text bold color="gray">LIVE TRANSCRIPT (last {recent.length}) — tab 9 for full stream</Text>
       <TranscriptLines entries={recent} />
     </Box>

@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import { getKernel } from '../../kernel.js';
 import type { TradeOutcomeRecord } from '../../learning/trade-ledger.js';
-
-const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
 
 const bar = (pct: number): string => {
   const filled = Math.round(Math.min(10, Math.max(0, pct / 10)));
@@ -85,17 +84,17 @@ export const LearningView = (): React.JSX.Element => {
   const { findings, byRegime } = useLearningData(k, ledger.outcomes);
 
   return (
-    <Box flexDirection="column" gap={1} paddingX={1}>
+    <Box flexDirection="column" gap={1}>
       <Text bold color="cyan">SELF-IMPROVING TRADE LEDGER &amp; EMPIRICAL LEARNING</Text>
       <StatsRow stats={stats} openTrades={ledger.openTrades.length} />
-      <Text color="gray">{rule()}</Text>
+      <Divider style="single" />
       <Text bold color="yellow">EVENT-DRIVEN FINDINGS (from durable store)</Text>
       {findings.length === 0 ? (
         <Text color="gray" italic>No learning events yet — closed trades and promotions will appear here.</Text>
       ) : findings.map((f) => (
         <Text key={`${f.time}-${f.title}`} color="gray">[{f.time}] <Text bold color="white">{f.title}</Text> ↳ {f.note}</Text>
       ))}
-      <Text color="gray">{rule()}</Text>
+      <Divider style="single" />
       <Text bold color="cyan">WIN-RATE BY REGIME (ledger)</Text>
       {[...byRegime.entries()].length === 0 ? (
         <Text color="gray" italic>No closed trades attributed to regimes yet.</Text>
