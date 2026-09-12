@@ -38,6 +38,7 @@ const leftPad = W_QTY + 1 + W_VOL + 1 + W_PX;
 export const quotePrice = (snap: SymbolSnapshot | undefined): number | undefined => {
   if (!snap) return undefined;
   if (snap.last !== undefined) return snap.last;
+  if (snap.trades.length > 0) return snap.trades[snap.trades.length - 1]?.price;
   if (snap.mark !== undefined) return snap.mark;
   if (snap.bestBid !== undefined && snap.bestAsk !== undefined) return (snap.bestBid + snap.bestAsk) / 2;
   if (snap.bids[0] && snap.asks[0]) return (snap.bids[0].price + snap.asks[0].price) / 2;
@@ -137,37 +138,46 @@ export interface DepthLadderProps {
   readonly micro?: MicrostructureView;
 }
 
+const DepthLevelRow = ({ bid, ask, sep }: {
+  readonly bid?: BookLevel;
+  readonly ask?: BookLevel;
+  readonly sep: string;
+}): React.JSX.Element => {
+  const left = bid
+    ? `${fmtQtyCol(bid.qty)} ${fmtVolCol(levelNotional(bid))} ${fmtPxCol(bid.price)}`
+    : `${' '.repeat(leftPad)}`;
+  const right = ask
+    ? `${fmtPxCol(ask.price)} ${fmtVolCol(levelNotional(ask))} ${fmtQtyCol(ask.qty)}`
+    : '';
+  return (
+    <Text>
+      <Text color="green">{left}</Text>
+      <Text color="gray">{sep}</Text>
+      <Text color="red">{right}</Text>
+    </Text>
+  );
+};
+
 export const DepthLadder = ({ bids, asks, last, mark, micro }: DepthLadderProps): React.JSX.Element => {
   const topBids = bids.slice(0, DEPTH_LEVELS);
   const topAsks = asks.slice(0, DEPTH_LEVELS);
+  const mid = topBids[0] && topAsks[0] ? (topBids[0].price + topAsks[0].price) / 2 : undefined;
+  const effectiveLast = last ?? mid;
+  const effectiveMark = mark ?? effectiveLast;
   const rows = Math.max(topBids.length, topAsks.length, 1);
   const sep = ' │ ';
 
   return (
     <Box flexDirection="column">
-      <DepthHeader last={last} mark={mark} micro={micro} />
+      <DepthHeader last={effectiveLast} mark={effectiveMark} micro={micro} />
       <Text color="gray">
         <Text color="green">{`${'qty'.padStart(W_QTY)} ${'vol'.padStart(W_VOL)} ${'price'.padStart(W_PX)}`}</Text>
         {sep}
         <Text color="red">{`${'price'.padStart(W_PX)} ${'vol'.padStart(W_VOL)} ${'qty'.padStart(W_QTY)}`}</Text>
       </Text>
-      {Array.from({ length: rows }, (_, i) => {
-        const bid = topBids[i];
-        const ask = topAsks[i];
-        const left = bid
-          ? `${fmtQtyCol(bid.qty)} ${fmtVolCol(levelNotional(bid))} ${fmtPxCol(bid.price)}`
-          : `${' '.repeat(leftPad)}`;
-        const right = ask
-          ? `${fmtPxCol(ask.price)} ${fmtVolCol(levelNotional(ask))} ${fmtQtyCol(ask.qty)}`
-          : '';
-        return (
-          <Text key={`row-${i}`}>
-            <Text color="green">{left}</Text>
-            <Text color="gray">{sep}</Text>
-            <Text color="red">{right}</Text>
-          </Text>
-        );
-      })}
+      {Array.from({ length: rows }, (_, i) => (
+        <DepthLevelRow key={`row-${i}`} bid={topBids[i]} ask={topAsks[i]} sep={sep} />
+      ))}
       {micro ? <DepthAggregate micro={micro} bids={bids} asks={asks} /> : null}
     </Box>
   );

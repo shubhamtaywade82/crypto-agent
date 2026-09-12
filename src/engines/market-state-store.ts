@@ -149,13 +149,14 @@ export class MarketStateStore {
     this.touch(b, u.at);
   }
 
-  /** Real top-of-book from the book-ticker stream (bid/ask, not last). */
   setBookTicker(u: BookTickerUpdate): void {
     if (!Number.isFinite(u.bid) || !Number.isFinite(u.ask) || u.bid <= 0 || u.ask <= 0) return;
     const b = this.book(u.symbol);
     b.bestBid = u.bid;
     b.bestAsk = u.ask;
     b.bestQuoteAt = u.at;
+    if (b.last === undefined) b.last = (u.bid + u.ask) / 2;
+    if (b.mark === undefined) b.mark = (u.bid + u.ask) / 2;
     this.touch(b, u.at);
   }
 
@@ -182,6 +183,8 @@ export class MarketStateStore {
       b.bestBid = b.bids[0].price;
       b.bestAsk = b.asks[0].price;
       b.bestQuoteAt = u.at;
+      if (b.last === undefined) b.last = (b.bids[0].price + b.asks[0].price) / 2;
+      if (b.mark === undefined) b.mark = (b.bids[0].price + b.asks[0].price) / 2;
     }
     this.touch(b, u.at);
   }
@@ -189,6 +192,7 @@ export class MarketStateStore {
   pushTrade(symbol: string, trade: TradePrint): void {
     const b = this.book(symbol);
     b.trades = [...b.trades, trade].slice(-TRADE_CAP);
+    b.last = trade.price;
     b.tradeSeq += 1;
     this.touch(b, trade.at);
   }
@@ -202,6 +206,9 @@ export class MarketStateStore {
       byKey.set(`${t.at}:${t.price}:${t.qty}`, t);
     }
     b.trades = [...byKey.values()].sort((a, c) => a.at - c.at).slice(-TRADE_CAP);
+    if (b.trades.length > 0 && b.last === undefined) {
+      b.last = b.trades[b.trades.length - 1]?.price;
+    }
     b.tradeSeq += 1;
     this.touch(b, Date.now());
   }
@@ -220,8 +227,16 @@ export class MarketStateStore {
     const candles = Object.fromEntries(
       TIMEFRAMES.map((tf) => [tf, capCandles(b.candles.get(tf)!, CANDLE_CAP[tf])])
     ) as Record<Timeframe, Candle[]>;
+    const mid = (b.bestBid !== undefined && b.bestAsk !== undefined)
+      ? (b.bestBid + b.bestAsk) / 2
+      : (b.bids[0] && b.asks[0])
+        ? (b.bids[0].price + b.asks[0].price) / 2
+        : undefined;
+    const lastTrade = b.trades.length > 0 ? b.trades[b.trades.length - 1]?.price : undefined;
+    const last = b.last ?? lastTrade ?? mid;
+    const mark = b.mark ?? last ?? mid;
     return {
-      symbol, candles, last: b.last, mark: b.mark, index: b.index,
+      symbol, candles, last, mark, index: b.index,
       fundingRate: b.fundingRate, openInterest: b.openInterest,
       openInterestChange: b.openInterestChange,
       bestBid: b.bestBid, bestAsk: b.bestAsk, bestQuoteAt: b.bestQuoteAt,

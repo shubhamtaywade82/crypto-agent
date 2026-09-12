@@ -12,13 +12,19 @@ export const hydrateSymbolMicro = async (
   const sym = symbol.toUpperCase();
   try {
     const at = Date.now();
-    const [depth, trades] = await Promise.all([
+    const [depth, trades, tickerPrice, markIndex] = await Promise.all([
       provider.getOrderBookDepth(sym, 20),
       provider.getAggTrades(sym, 50),
+      provider.getTickerPrice(sym).catch(() => undefined),
+      provider.getMarkIndex(sym).catch(() => undefined),
     ]);
     if (depth.bids.length === 0 || depth.asks.length === 0) return false;
     store.setDepth({ symbol: sym, bids: depth.bids, asks: depth.asks, at });
     store.mergeTrades(sym, trades);
+    if (tickerPrice !== undefined) store.setTicker({ symbol: sym, price: tickerPrice, at });
+    if (markIndex !== undefined) {
+      store.setMarkIndex({ symbol: sym, mark: markIndex.mark, index: markIndex.index, at });
+    }
     return true;
   } catch {
     return false;
