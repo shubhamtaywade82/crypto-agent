@@ -4,9 +4,9 @@ import { getKernel } from './kernel.js';
 import { buildMarketState } from './engines/market-state-engine.js';
 import { detectSetups } from './engines/setup-engine.js';
 import type { TradeProposal } from './domain/orders/trade-proposal.js';
-import type { MarketState } from './domain/market/types.js';
 import { deriveCircuitState } from './domain/risk/risk-config.js';
 import { DEFAULT_RISK_LIMITS } from './domain/risk/risk-config.js';
+import type { GatewayProposeResult } from './engines/policy-gateway.js';
 
 const proposalSchema = z.object({
   symbol: z.string().describe('Market symbol, e.g. SOLUSDT'),
@@ -64,6 +64,47 @@ const createSetupsTool = (): AnyTool =>
     },
   });
 
+const formatProposalResult = (res: GatewayProposeResult): Record<string, unknown> => {
+  if (!res.approved) {
+    return {
+      approved: false,
+      status: res.status,
+      reasons: res.reasons ?? res.risk?.reasons ?? [res.status],
+      circuitState: res.risk?.circuitState,
+      rejections: res.risk?.rejections,
+    };
+  }
+  return {
+    decisionId: res.decisionId,
+    approved: true,
+    expiresAt: res.expiresAt,
+    circuitState: res.risk.circuitState,
+    rejections: res.risk.rejections,
+    reasons: res.risk.reasons,
+    sizing: {
+      quantity: res.sizing.quantity,
+      notional: res.sizing.notional,
+      leverage: res.sizing.leverage,
+      riskAmount: res.sizing.riskAmount,
+      warnings: res.sizing.warnings,
+    },
+    rr: res.validation.rr,
+    checks: res.risk.checks,
+  };
+};
+
+const runProposeTrade = async (args: z.infer<typeof proposalSchema>): Promise<Record<string, unknown>> => {
+  const kernel = getKernel();
+  const symbol = args.symbol.toUpperCase();
+  const mtf = await buildMarketState(kernel.provider, symbol);
+  const proposal = buildProposal({ ...args, symbol });
+  const pair = kernel.router && kernel.broker.id === 'coindcx'
+    ? (await kernel.router.resolve(symbol)).pair
+    : `B-${symbol.replace(/USDT$/, '')}_USDT`;
+  const result = await kernel.gateway.propose(proposal, mtf.state, pair);
+  return formatProposalResult(result);
+};
+
 const createProposeTool = (): AnyTool =>
   defineTool({
     name: 'propose_trade',
@@ -73,62 +114,18 @@ const createProposeTool = (): AnyTool =>
       'and returns APPROVED or REJECTED. Approval does NOT execute — call ' +
       'execute_approved_intent with the returned decisionId.',
     schema: proposalSchema,
-    execute: async (args) => {
-      const kernel = getKernel();
-      const symbol = args.symbol.toUpperCase();
-      const mtf = await buildMarketState(kernel.provider, symbol);
-      const state: MarketState = mtf.state;
-      const proposal = buildProposal({ ...args, symbol });
-      const assessed = await kernel.assess(proposal, state);
-      return {
-        decisionId: assessed.risk.decisionId,
-        approved: assessed.risk.approved,
-        circuitState: assessed.risk.circuitState,
-        rejections: assessed.risk.rejections,
-        reasons: assessed.risk.reasons,
-        sizing: {
-          quantity: assessed.sizing.quantity,
-          notional: assessed.sizing.notional,
-          leverage: assessed.sizing.leverage,
-          riskAmount: assessed.sizing.riskAmount,
-          warnings: assessed.sizing.warnings,
-        },
-        rr: assessed.validation.rr,
-        checks: assessed.risk.checks,
-      };
-    },
+    execute: async (args) => runProposeTrade(args),
   });
 
-interface ExecuteIntentArgs {
-  readonly decisionId: string;
-  readonly symbol: string;
-  readonly entry: number;
-  readonly stopLoss: number;
-  readonly takeProfit: number;
-  readonly direction: 'LONG' | 'SHORT';
-}
-
-const runApprovedIntent = async (args: ExecuteIntentArgs): Promise<Record<string, unknown>> => {
+const runExecuteApprovedIntent = async (decisionId: string): Promise<Record<string, unknown>> => {
   const kernel = getKernel();
-  const symbol = args.symbol.toUpperCase();
-  const mtf = await buildMarketState(kernel.provider, symbol);
-  const proposal = buildProposal({
-    symbol,
-    direction: args.direction,
-    entry: args.entry,
-    stopLoss: args.stopLoss,
-    takeProfit: args.takeProfit,
-    confidence: 0.75,
-    thesis: 'approved intent execution',
-    invalidation: 'as approved',
-    setupType: 'APPROVED_INTENT',
-  });
-  const pair = kernel.router && kernel.broker.id === 'coindcx'
-    ? (await kernel.router.resolve(symbol)).pair
-    : `B-${symbol.replace(/USDT$/, '')}_USDT`;
-  const result = await kernel.gateway.execute(proposal, mtf.state, pair);
+  const result = await kernel.gateway.executeApproved(decisionId);
   if (!result.ok) {
-    return { executed: false, reason: result.reasons?.join(', ') ?? result.status, decision: result.risk };
+    return {
+      executed: false,
+      status: result.status,
+      reason: result.reasons?.join(', ') ?? result.status,
+    };
   }
   return {
     executed: true,
@@ -143,16 +140,11 @@ const createExecuteTool = (): AnyTool =>
     name: 'execute_approved_intent',
     description:
       'Execute a RISK_APPROVED intent by its decisionId. Orders are idempotent ' +
-      '(client_order_id = decisionId). Fails if the intent was never approved.',
+      '(client_order_id = decisionId). Fails if the intent was never approved, expired, or halted.',
     schema: z.object({
-      decisionId: z.string(),
-      symbol: z.string(),
-      entry: z.number(),
-      stopLoss: z.number(),
-      takeProfit: z.number(),
-      direction: z.enum(['LONG', 'SHORT']),
+      decisionId: z.string().describe('The decisionId returned by propose_trade'),
     }),
-    execute: async (args) => runApprovedIntent(args),
+    execute: async (args) => runExecuteApprovedIntent(args.decisionId),
   });
 
 const createPortfolioTool = (): AnyTool =>

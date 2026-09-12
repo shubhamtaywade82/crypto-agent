@@ -34,6 +34,27 @@ export type GatewayExecutionResult =
   | { readonly ok: true; readonly status: string; readonly intent: ExecutionIntent; readonly order: TrackedOrder }
   | { readonly ok: false; readonly status: string; readonly reasons?: readonly string[]; readonly risk?: RiskDecision; readonly sizing?: SizingResult };
 
+export interface ApprovedTradeIntent {
+  readonly decisionId: string;
+  readonly proposal: TradeProposal;
+  readonly sizing: SizingResult;
+  readonly risk: RiskDecision;
+  readonly reservationId: string;
+  readonly pair: string;
+  readonly expectedPrice: number;
+  readonly maxSlippageBps: number;
+  readonly regime: string;
+  readonly fundingRate: number;
+  readonly plannedRr: number;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  state: 'PENDING' | 'CONSUMED' | 'EXPIRED';
+}
+
+export type GatewayProposeResult =
+  | { readonly ok: true; readonly decisionId: string; readonly approved: true; readonly expiresAt: number; readonly risk: RiskDecision; readonly sizing: SizingResult; readonly validation: ReturnType<typeof validateProposal> }
+  | { readonly ok: false; readonly approved: false; readonly status: string; readonly reasons?: readonly string[]; readonly risk?: RiskDecision; readonly sizing?: SizingResult };
+
 const checkGates = async (
   deps: PolicyGatewayDeps,
   proposal: TradeProposal,
@@ -41,30 +62,20 @@ const checkGates = async (
 ): Promise<{ readonly ok: boolean; readonly reasons: readonly string[] }> => {
   const allowed = deps.isTradingAllowed();
   if (!allowed.allowed) return { ok: false, reasons: [allowed.reason ?? 'trading halted'] };
-
   if (deps.strategyGate) {
     const verdict = deps.strategyGate(proposal.setupType, proposal.setupType, regime);
     if (!verdict.allowed) return { ok: false, reasons: [verdict.reason ?? 'strategy cell not tradable'] };
   }
-
   if (deps.crossVenueGate) {
     const xGate = await deps.crossVenueGate(proposal.symbol);
     if (!xGate.tradable) return { ok: false, reasons: xGate.reasons };
   }
-
   return { ok: true, reasons: [] };
 };
 
-const settleGatewayReservation = (
-  reservations: RiskReservationManager,
-  id: string,
-  status: string
-): void => {
-  if (status === 'FILLED' || status === 'POSITION_OPEN') {
-    reservations.commit(id);
-  } else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') {
-    reservations.release(id);
-  }
+const settleGatewayReservation = (reservations: RiskReservationManager, id: string, status: string): void => {
+  if (status === 'FILLED' || status === 'POSITION_OPEN') reservations.commit(id);
+  else if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') reservations.release(id);
 };
 
 type GateCheckOutcome =
@@ -149,38 +160,127 @@ const submitGatedIntent = async (
   return order;
 };
 
+interface CreateIntentParams {
+  readonly proposal: TradeProposal;
+  readonly sizing: SizingResult;
+  readonly risk: RiskDecision;
+  readonly resvId: string;
+  readonly pair: string;
+  readonly state: MarketState;
+  readonly plannedRr: number;
+}
+
+const buildApprovedIntent = (p: CreateIntentParams): ApprovedTradeIntent => {
+  const now = Date.now();
+  const ttl = Number(process.env.INTENT_TTL_MS ?? 60_000);
+  return {
+    decisionId: p.risk.decisionId,
+    proposal: p.proposal,
+    sizing: p.sizing,
+    risk: p.risk,
+    reservationId: p.resvId,
+    pair: p.pair,
+    expectedPrice: p.proposal.entry,
+    maxSlippageBps: Number(process.env.MAX_SLIPPAGE_BPS ?? 25),
+    regime: p.state.regime,
+    fundingRate: p.state.futures.fundingRate,
+    plannedRr: p.plannedRr,
+    createdAt: now,
+    expiresAt: now + ttl,
+    state: 'PENDING',
+  };
+};
+
+type VerifyOutcome =
+  | { readonly ok: true; readonly intent: ApprovedTradeIntent }
+  | { readonly ok: false; readonly status: string; readonly reason: string };
+
+const verifyPendingIntent = (
+  intent: ApprovedTradeIntent | undefined,
+  decisionId: string,
+  isTradingAllowed: () => { readonly allowed: boolean; readonly reason?: string }
+): VerifyOutcome => {
+  if (!intent) return { ok: false, status: 'NOT_FOUND', reason: `Approved intent ${decisionId} not found` };
+  if (intent.state === 'CONSUMED') return { ok: false, status: 'ALREADY_CONSUMED', reason: `Intent ${decisionId} already executed` };
+  if (intent.state === 'EXPIRED') return { ok: false, status: 'EXPIRED', reason: `Intent ${decisionId} expired` };
+  if (Date.now() > intent.expiresAt) return { ok: false, status: 'EXPIRED', reason: `Intent ${decisionId} expired (TTL exceeded)` };
+  const allowed = isTradingAllowed();
+  if (!allowed.allowed) return { ok: false, status: 'HALTED', reason: allowed.reason ?? 'Trading is halted' };
+  return { ok: true, intent };
+};
+
 export class PolicyGateway {
+  private readonly intents = new Map<string, ApprovedTradeIntent>();
+
   constructor(private readonly deps: PolicyGatewayDeps) {}
 
-  async execute(proposal: TradeProposal, state: MarketState, pair: string): Promise<GatewayExecutionResult> {
+  async propose(proposal: TradeProposal, state: MarketState, pair: string): Promise<GatewayProposeResult> {
     const gated = await validateAndGate(this.deps, proposal, state.regime);
-    if (!gated.ok) return { ok: false, status: gated.status, reasons: gated.reasons };
+    if (!gated.ok) return { ok: false, approved: false, status: gated.status, reasons: gated.reasons };
 
     const { portfolio, sizing, risk } = await evaluateProposalRisk(this.deps, proposal, state, gated.validation);
-    if (!risk.approved) return { ok: false, status: 'REJECTED', risk, sizing };
+    if (!risk.approved) return { ok: false, approved: false, status: 'REJECTED', risk, sizing };
 
     const cluster = clusterOf(proposal.symbol);
     const resv = this.deps.reservations.reserve(portfolio, {
       symbol: proposal.symbol, cluster, notional: sizing.notional,
       riskAmount: sizing.riskAmount, addsPosition: true,
     }, this.deps.limits);
-    if (!resv.ok || !resv.reservation) return { ok: false, status: 'REJECTED', reasons: [resv.detail] };
+    if (!resv.ok || !resv.reservation) return { ok: false, approved: false, status: 'REJECTED', reasons: [resv.detail] };
 
-    const intent = buildExecutionIntent({
-      pair, proposal, sizing, risk, reservationId: resv.reservation.id,
-      expectedPrice: proposal.entry, maxSlippageBps: Number(process.env.MAX_SLIPPAGE_BPS ?? 25),
-      regime: state.regime, fundingRate: state.futures.fundingRate,
+    const intent = buildApprovedIntent({
+      proposal, sizing, risk, resvId: resv.reservation.id, pair, state, plannedRr: gated.validation.rr,
+    });
+    this.intents.set(risk.decisionId, intent);
+    this.deps.store.appendClassified({
+      type: 'intent.approved', symbol: proposal.symbol, decisionId: risk.decisionId,
+      payload: { reservationId: resv.reservation.id, pair, expiresAt: intent.expiresAt, notional: sizing.notional },
     });
     this.deps.registerPendingSnapshot?.({
-      decisionId: intent.intentId, symbol: proposal.symbol, strategyId: proposal.setupType,
+      decisionId: intent.decisionId, symbol: proposal.symbol, strategyId: proposal.setupType,
       direction: proposal.direction, entry: proposal.entry, stopLoss: proposal.stopLoss,
       takeProfit: proposal.takeProfit, plannedRr: gated.validation.rr, regime: state.regime,
       fundingRate: state.futures.fundingRate, leverage: sizing.leverage,
       riskAmount: sizing.riskAmount, notional: sizing.notional,
-      confidence: proposal.confidence, openedAt: Date.now(),
+      confidence: proposal.confidence, openedAt: intent.createdAt,
     });
+    return { ok: true, approved: true, decisionId: risk.decisionId, expiresAt: intent.expiresAt, risk, sizing, validation: gated.validation };
+  }
 
-    const order = await submitGatedIntent(this.deps, intent, proposal, sizing);
-    return { ok: true, status: order.status, intent, order };
+  async executeApproved(decisionId: string): Promise<GatewayExecutionResult> {
+    const intent = this.intents.get(decisionId);
+    const verified = verifyPendingIntent(intent, decisionId, this.deps.isTradingAllowed);
+    if (!verified.ok) {
+      if (intent && (verified.status === 'EXPIRED' || verified.status === 'HALTED')) {
+        intent.state = 'EXPIRED';
+        this.deps.reservations.release(intent.reservationId);
+      }
+      return { ok: false, status: verified.status, reasons: [verified.reason] };
+    }
+    const approved = verified.intent;
+    approved.state = 'CONSUMED';
+    const execIntent = buildExecutionIntent({
+      pair: approved.pair, proposal: approved.proposal, sizing: approved.sizing, risk: approved.risk,
+      reservationId: approved.reservationId, expectedPrice: approved.expectedPrice,
+      maxSlippageBps: approved.maxSlippageBps, regime: approved.regime, fundingRate: approved.fundingRate,
+    });
+    const order = await submitGatedIntent(this.deps, execIntent, approved.proposal, approved.sizing);
+    this.deps.store.appendClassified({
+      type: 'intent.executed', symbol: approved.proposal.symbol, decisionId,
+      payload: { orderId: order.orderId, status: order.status },
+    });
+    return { ok: true, status: order.status, intent: execIntent, order };
+  }
+
+  async execute(proposal: TradeProposal, state: MarketState, pair: string): Promise<GatewayExecutionResult> {
+    const proposed = await this.propose(proposal, state, pair);
+    if (!proposed.ok) {
+      return { ok: false, status: proposed.status, reasons: proposed.reasons, risk: proposed.risk, sizing: proposed.sizing };
+    }
+    return this.executeApproved(proposed.decisionId);
+  }
+
+  getPendingIntent(decisionId: string): ApprovedTradeIntent | undefined {
+    return this.intents.get(decisionId);
   }
 }

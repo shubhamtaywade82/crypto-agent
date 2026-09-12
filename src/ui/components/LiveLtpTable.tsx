@@ -6,12 +6,36 @@ import { kernelWatchSymbols } from '../../kernel-streams.js';
 
 const STALE_MS = 5_000;
 
-export const useLiveTick = (intervalMs = 300): number => {
-  const [tick, setTick] = useState(0);
+let globalTick = 0;
+const subscribers = new Set<() => void>();
+let globalTimer: NodeJS.Timeout | null = null;
+
+const ensureTimer = (): void => {
+  if (globalTimer) return;
+  globalTimer = setInterval(() => {
+    globalTick += 1;
+    for (const sub of subscribers) sub();
+  }, 1000);
+};
+
+const releaseTimer = (): void => {
+  if (subscribers.size === 0 && globalTimer) {
+    clearInterval(globalTimer);
+    globalTimer = null;
+  }
+};
+
+export const useLiveTick = (): number => {
+  const [tick, setTick] = useState(globalTick);
   useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), intervalMs);
-    return (): void => clearInterval(t);
-  }, [intervalMs]);
+    const onTick = (): void => setTick(globalTick);
+    subscribers.add(onTick);
+    ensureTimer();
+    return (): void => {
+      subscribers.delete(onTick);
+      releaseTimer();
+    };
+  }, []);
   return tick;
 };
 
@@ -31,6 +55,27 @@ export const liveQuote = (symbol: string): {
 
 const pad = (v: string, n: number): string => v.padEnd(n);
 
+interface LtpRowProps {
+  readonly sym: string;
+  readonly isAnchor: boolean;
+}
+
+const LtpRow = ({ sym, isAnchor }: LtpRowProps): React.JSX.Element => {
+  const q = liveQuote(sym);
+  const status = isAnchor ? '● ANCHOR' : q.live ? '● LIVE' : q.ltp !== undefined ? '○ STALE' : '… WAIT';
+  const statusColor = isAnchor ? 'cyan' : q.live ? 'green' : q.ltp !== undefined ? 'yellow' : 'gray';
+  return (
+    <Text key={sym} wrap="truncate">
+      <Text bold color={isAnchor ? 'yellow' : undefined}>{pad(sym, 10)}</Text>
+      <Text color="white">{pad(q.ltp !== undefined ? fmtPrice(q.ltp) : '—', 14)}</Text>
+      <Text color="green">{pad(q.bid !== undefined ? fmtPrice(q.bid) : '—', 14)}</Text>
+      <Text color="red">{pad(q.ask !== undefined ? fmtPrice(q.ask) : '—', 14)}</Text>
+      <Text color="gray">{pad(q.mark !== undefined ? fmtPrice(q.mark) : '—', 14)}</Text>
+      <Text color={statusColor}>{status}</Text>
+    </Text>
+  );
+};
+
 export const LiveLtpTable = (): React.JSX.Element => {
   useLiveTick();
   const symbols = useMemo(() => kernelWatchSymbols(), []);
@@ -47,22 +92,9 @@ export const LiveLtpTable = (): React.JSX.Element => {
       <Text color="gray">
         {pad('SYMBOL', 10)}{pad('LTP', 14)}{pad('BID', 14)}{pad('ASK', 14)}{pad('MARK', 14)}STATUS
       </Text>
-      {symbols.map((sym) => {
-        const q = liveQuote(sym);
-        const isAnchor = sym === 'BTCUSDT' && !traded.has('BTCUSDT');
-        const status = isAnchor ? '● ANCHOR' : q.live ? '● LIVE' : q.ltp !== undefined ? '○ STALE' : '… WAIT';
-        const statusColor = isAnchor ? 'cyan' : q.live ? 'green' : q.ltp !== undefined ? 'yellow' : 'gray';
-        return (
-          <Text key={sym} wrap="truncate">
-            <Text bold color={isAnchor ? 'yellow' : undefined}>{pad(sym, 10)}</Text>
-            <Text color="white">{pad(q.ltp !== undefined ? fmtPrice(q.ltp) : '—', 14)}</Text>
-            <Text color="green">{pad(q.bid !== undefined ? fmtPrice(q.bid) : '—', 14)}</Text>
-            <Text color="red">{pad(q.ask !== undefined ? fmtPrice(q.ask) : '—', 14)}</Text>
-            <Text color="gray">{pad(q.mark !== undefined ? fmtPrice(q.mark) : '—', 14)}</Text>
-            <Text color={statusColor}>{status}</Text>
-          </Text>
-        );
-      })}
+      {symbols.map((sym) => (
+        <LtpRow key={sym} sym={sym} isAnchor={sym === 'BTCUSDT' && !traded.has('BTCUSDT')} />
+      ))}
     </Box>
   );
 };

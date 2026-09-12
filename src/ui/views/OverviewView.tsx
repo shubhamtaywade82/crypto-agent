@@ -34,7 +34,6 @@ export interface OverviewViewProps {
 const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
 
 const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => {
-  useLiveTick(200);
   const snap = getKernel().marketStore.snapshot(symbol);
   return (
     <Box flexDirection="row" marginTop={1}>
@@ -54,7 +53,6 @@ const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Elemen
 };
 
 const MarketWatchPanel = ({ focusSymbol }: { readonly focusSymbol: string }): React.JSX.Element => {
-  useLiveTick();
   const symbols = useMemo(() => kernelWatchSymbols(), []);
   useEffect(() => {
     void ensureSymbolTracked(focusSymbol);
@@ -92,6 +90,20 @@ const SidebarPositions = ({ positions }: { readonly positions: readonly BrokerPo
   </Box>
 );
 
+const SidebarSystemStatus = ({ streamLive, halted, circuit }: {
+  readonly streamLive: boolean;
+  readonly halted: boolean;
+  readonly circuit: string;
+}): React.JSX.Element => (
+  <Box flexDirection="column">
+    <Text bold color="yellow">SYSTEM STATUS</Text>
+    <StatusDot ok={true} label="Agent Runtime" />
+    <StatusDot ok={streamLive} label="Binance MD WS" />
+    <StatusDot ok={!halted} label="Execution" />
+    <Text color="gray">● Circuit: <Text color="white">{circuit}</Text></Text>
+  </Box>
+);
+
 const OverviewSidebar = (p: {
   readonly positions: readonly BrokerPosition[];
   readonly opportunities: readonly ScanOpportunity[];
@@ -103,17 +115,10 @@ const OverviewSidebar = (p: {
   const k = getKernel();
   const snap = p.port ?? k.portfolio.peek();
   const circuit = deriveCircuitState(snap.dailyLossPercent, snap.drawdownPercent, snap.lossStreak, k.limits);
-  const topOpps = p.opportunities.slice(0, 4);
 
   return (
     <Box flexDirection="column" width={38} flexShrink={0} gap={1}>
-      <Box flexDirection="column">
-        <Text bold color="yellow">SYSTEM STATUS</Text>
-        <StatusDot ok={true} label="Agent Runtime" />
-        <StatusDot ok={p.streamLive ?? false} label="Binance MD WS" />
-        <StatusDot ok={!k.killSwitch.halted} label="Execution" />
-        <Text color="gray">● Circuit: <Text color="white">{circuit}</Text></Text>
-      </Box>
+      <SidebarSystemStatus streamLive={p.streamLive ?? false} halted={k.killSwitch.halted} circuit={circuit} />
       <Box flexDirection="column">
         <Text bold color="yellow">PORTFOLIO</Text>
         <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text></Text>
@@ -122,7 +127,7 @@ const OverviewSidebar = (p: {
       </Box>
       <Box flexDirection="column">
         <Text bold color="yellow">TOP OPPORTUNITIES</Text>
-        <OpportunityTable rows={topOpps} markets={p.markets} isScanning={p.isScanning} selectedIndex={-1} compact />
+        <OpportunityTable rows={p.opportunities.slice(0, 4)} markets={p.markets} isScanning={p.isScanning} selectedIndex={-1} compact />
       </Box>
       <SidebarPositions positions={p.positions.slice(0, 3)} />
     </Box>
@@ -132,7 +137,6 @@ const OverviewSidebar = (p: {
 export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
   useLiveTick();
   const brief = buildTraderBrief(p.focusSymbol, p.pipelineSnapshots ?? {}, p.opportunities);
-  const transcript = p.transcript ?? [];
 
   return (
     <Box flexDirection="column" gap={0} paddingX={1}>
@@ -141,7 +145,7 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
       <Box flexDirection="row" gap={1}>
         <Box flexDirection="column" flexGrow={1} minWidth={40}>
           <AgentConsoleFeed
-            entries={transcript}
+            entries={p.transcript ?? []}
             scrollOffset={p.selectedIndex}
             autoScroll={p.autoEnabled ?? true}
             limit={8}
