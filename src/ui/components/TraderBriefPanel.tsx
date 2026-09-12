@@ -1,13 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { Badge, type BadgeVariant } from '../../components/ui/badge/index.js';
 import type { TraderBrief, TraderStance } from '../overview-brief.js';
 
-const stanceColor = (s: TraderStance): string => {
-  if (s === 'LONG') return 'green';
-  if (s === 'SHORT') return 'red';
-  if (s === 'AVOID') return 'red';
-  if (s === 'WAIT') return 'yellow';
-  return 'cyan';
+const stanceVariant = (s: TraderStance): BadgeVariant => {
+  if (s === 'LONG') return 'success';
+  if (s === 'SHORT') return 'error';
+  if (s === 'AVOID') return 'error';
+  if (s === 'WAIT') return 'warning';
+  return 'info';
 };
 
 const LevelsRow = ({ levels }: { readonly levels: TraderBrief['levels'] }): React.JSX.Element | null => {
@@ -33,11 +34,10 @@ export const TraderBriefPanel = ({ brief }: { readonly brief: TraderBrief }): Re
         <Text bold color="cyan">TRADER BRIEF — {brief.symbol}</Text>
         <Text color="gray">MD:<Text color={freshColor}>{fresh}</Text> {brief.pipelineAge ? `· scan ${brief.pipelineAge}` : ''}</Text>
       </Box>
-      <Text wrap="truncate">
-        <Text bold color={stanceColor(brief.stance)}>{brief.stance}</Text>
-        <Text color="gray"> │ </Text>
-        <Text color="white">{brief.headline}</Text>
-      </Text>
+      <Box gap={1} alignItems="center">
+        <Badge variant={stanceVariant(brief.stance)}>{brief.stance}</Badge>
+        <Text color="white" wrap="truncate">{brief.headline}</Text>
+      </Box>
       <Text color="gray" wrap="truncate">
         Regime <Text color="white">{brief.regime}</Text> │ MTF <Text color="white">{brief.mtf}</Text>
         {brief.setup ? <> │ Setup <Text color="yellow">{brief.setup}</Text></> : null}

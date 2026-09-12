@@ -1,6 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Divider } from '../../components/ui/divider/index.js';
+import { KeyHint, type KeyHintItem } from '../../components/ui/key-hint/index.js';
+import { Badge } from '../../components/ui/badge/index.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import { getKernel } from '../../kernel.js';
 
@@ -8,6 +10,13 @@ export interface PositionsViewProps {
   readonly positions: readonly BrokerPosition[];
   readonly selectedIndex: number;
 }
+
+const POSITION_KEYS: readonly KeyHintItem[] = [
+  { key: 'Enter', label: 'Details' },
+  { key: 't', label: 'Adjust TPSL' },
+  { key: 'x', label: 'Market Close' },
+  { key: 'l', label: 'Lineage Trace' },
+];
 
 const pairToSymbol = (pair: string): string => pair.replace(/^B-/, '').replace('_', '');
 
@@ -21,18 +30,18 @@ const PositionDetail = ({ p }: { readonly p: BrokerPosition }): React.JSX.Elemen
   return (
   <Box flexDirection="column">
     <Divider style="single" />
-    <Text bold color="yellow">SELECTED POSITION: {p.pair} ({p.side.toUpperCase()})</Text>
+    <Box gap={1} alignItems="center" marginBottom={0}>
+      <Text bold color="yellow">SELECTED POSITION: {p.pair}</Text>
+      <Badge variant={p.side === 'long' ? 'success' : 'error'}>{p.side.toUpperCase()}</Badge>
+    </Box>
     <Text color="gray">├─ Strategy:     <Text color="white">{ledger?.strategyId ?? '—'}</Text></Text>
     <Text color="gray">├─ Entry Price:  <Text color="white">{p.entryPrice.toFixed(2)} USDT</Text></Text>
     <Text color="gray">├─ Leverage:     <Text color="white">{p.leverage ?? ledger?.leverage ?? 2}x</Text></Text>
     <Text color="gray">├─ Stop Loss:    <Text color="white">{ledger ? ledger.stopLoss.toFixed(2) : '—'} USDT</Text></Text>
     <Text color="gray">├─ Take Profit:  <Text color="white">{ledger ? ledger.takeProfit.toFixed(2) : '—'} USDT</Text></Text>
     <Text color="gray">└─ Planned R:R:  <Text color="white">{ledger ? ledger.plannedRr.toFixed(2) : '—'} · regime {ledger?.regime ?? '—'}</Text></Text>
-    <Box gap={2} marginTop={1}>
-      <Text color="cyan">[Enter] Details</Text>
-      <Text color="cyan">[t] Adjust TPSL</Text>
-      <Text color="cyan">[x] Market Close</Text>
-      <Text color="cyan">[l] Lineage Trace</Text>
+    <Box marginTop={1}>
+      <KeyHint keys={[...POSITION_KEYS]} />
     </Box>
   </Box>
   );

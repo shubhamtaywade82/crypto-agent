@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { Divider } from '../../components/ui/divider/index.js';
+import { Stepper, type Step } from '../../components/ui/stepper/index.js';
+import { Badge } from '../../components/ui/badge/index.js';
 import { getKernel } from '../../kernel.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
 import type { TrackedOrder } from '../../engines/execution-engine.js';
@@ -18,6 +20,8 @@ const FSM_STEPS: readonly OrderStatus[] = [
   'FILLED',
   'POSITION_OPEN',
 ];
+
+const STEPS: readonly Step[] = FSM_STEPS.map((s) => ({ key: s, title: s }));
 
 const OrdersTable = (p: {
   readonly orders: readonly TrackedOrder[];
@@ -41,27 +45,27 @@ const OrdersTable = (p: {
   </Box>
 );
 
-const FsmLifecycle = ({ selected }: { readonly selected: TrackedOrder }): React.JSX.Element => (
-  <Box flexDirection="column">
-    <Divider style="single" />
-    <Text bold color="yellow">FSM LIFECYCLE: {selected.intentId} ({selected.pair})</Text>
-    <Box flexDirection="column" marginY={0}>
-      {FSM_STEPS.map((step, idx) => {
-        const isReached = FSM_STEPS.indexOf(selected.status) >= idx;
-        const isCurrent = selected.status === step;
-        return (
-          <Box key={step} flexDirection="column">
-            <Text color={isCurrent ? 'green' : isReached ? 'white' : 'gray'}>
-              {'  '}{isCurrent ? '●' : isReached ? '✓' : '○'} <Text bold={isCurrent}>{step}</Text>
-              {isCurrent ? <Text color="green"> (CURRENT)</Text> : null}
-            </Text>
-            {idx < FSM_STEPS.length - 1 && <Text color="gray">{'    │'}</Text>}
-          </Box>
-        );
-      })}
+const FsmLifecycle = ({ selected }: { readonly selected: TrackedOrder }): React.JSX.Element => {
+  const curIdx = FSM_STEPS.indexOf(selected.status);
+  const completed = curIdx >= 0 ? FSM_STEPS.slice(0, curIdx) : [];
+  const isFilled = selected.status === 'FILLED' || selected.status === 'POSITION_OPEN';
+  const badgeVariant = isFilled ? 'success' : selected.status === 'UNKNOWN' ? 'error' : 'warning';
+  return (
+    <Box flexDirection="column">
+      <Divider style="single" />
+      <Box justifyContent="space-between" alignItems="center" marginBottom={1}>
+        <Text bold color="yellow">FSM LIFECYCLE: {selected.intentId} ({selected.pair})</Text>
+        <Badge variant={badgeVariant}>{selected.status}</Badge>
+      </Box>
+      <Stepper
+        steps={[...STEPS]}
+        currentStep={selected.status}
+        completedSteps={[...completed]}
+        orientation="vertical"
+      />
     </Box>
-  </Box>
-);
+  );
+};
 
 const useOpenOrders = (): readonly TrackedOrder[] => {
   const [orders, setOrders] = useState<readonly TrackedOrder[]>([]);

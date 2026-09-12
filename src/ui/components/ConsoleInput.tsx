@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { Divider } from '../../components/ui/divider/index.js';
+import { Spinner } from '../../components/ui/spinner/index.js';
 
 export interface ConsoleInputProps {
   readonly value: string;
@@ -47,10 +48,14 @@ export const ConsoleInput = (p: ConsoleInputProps): React.JSX.Element => {
   return (
     <Box flexDirection="column" marginTop={0}>
       <Divider style="single" />
-      <Box>
-        <Text bold color={p.busy ? 'yellow' : 'cyan'}>
-          {p.busy ? `${p.spinner ?? '⠋'} ` : '> '}
-        </Text>
+      <Box alignItems="center">
+        {p.busy ? (
+          <Box marginRight={1}>
+            <Spinner type="dots" />
+          </Box>
+        ) : (
+          <Text bold color="cyan">{'> '}</Text>
+        )}
         <Text wrap="truncate">
           {p.value.length > 0 ? (
             <Text color="white">{p.value}</Text>

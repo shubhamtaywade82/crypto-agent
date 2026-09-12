@@ -1,5 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { Badge, type BadgeVariant } from '../../components/ui/badge/index.js';
+import { Divider } from '../../components/ui/divider/index.js';
 import type { ActivityTimelineItem } from '../types.js';
 
 export interface EventsViewProps {
@@ -7,12 +9,12 @@ export interface EventsViewProps {
   readonly selectedIndex: number;
 }
 
-const levelColor = (lvl: string): string => {
+const badgeVariant = (lvl: string): BadgeVariant => {
   switch (lvl) {
-    case 'SUCCESS': return 'green';
-    case 'WARN': return 'yellow';
-    case 'ERROR': return 'red';
-    default: return 'cyan';
+    case 'SUCCESS': return 'success';
+    case 'WARN': return 'warning';
+    case 'ERROR': return 'error';
+    default: return 'info';
   }
 };
 
@@ -31,14 +33,19 @@ const actorColor = (act: string): string => {
 };
 
 const TimelineTable = (p: { readonly timeline: readonly ActivityTimelineItem[]; readonly safeIdx: number }): React.JSX.Element => (
-  <Box flexDirection="column">
+  <Box flexDirection="column" gap={0}>
     <Text color="gray">   TIME      LEVEL    ACTOR         EVENT SUMMARY</Text>
+    <Divider style="single" />
     {p.timeline.map((item, idx) => {
       const isSel = idx === p.safeIdx;
       return (
-        <Text key={item.id} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-          {isSel ? ' >' : '  '} {item.at.padEnd(9)} <Text color={isSel ? 'black' : levelColor(item.level)}>{item.level.padEnd(8)}</Text> <Text color={isSel ? 'black' : actorColor(item.actor)}>{item.actor.padEnd(13)}</Text> {item.summary}
-        </Text>
+        <Box key={item.id} gap={1} alignItems="center">
+          <Text color={isSel ? 'cyan' : 'gray'}>{isSel ? '>' : ' '}</Text>
+          <Text color="gray">{item.at}</Text>
+          <Badge variant={badgeVariant(item.level)}>{item.level}</Badge>
+          <Text color={actorColor(item.actor)}>{item.actor.padEnd(11)}</Text>
+          <Text color={isSel ? 'cyan' : 'white'} wrap="truncate">{item.summary}</Text>
+        </Box>
       );
     })}
   </Box>

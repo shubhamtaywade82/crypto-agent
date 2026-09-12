@@ -1,13 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { Divider } from '../../components/ui/divider/index.js';
+import { ProgressBar } from '../../components/ui/progress-bar/index.js';
 import { getKernel } from '../../kernel.js';
 import type { TradeOutcomeRecord } from '../../learning/trade-ledger.js';
-
-const bar = (pct: number): string => {
-  const filled = Math.round(Math.min(10, Math.max(0, pct / 10)));
-  return `[${'█'.repeat(filled)}${'░'.repeat(10 - filled)}]`;
-};
 
 const formatEventFinding = (type: string, payload: Record<string, unknown>): string => {
   if (type === 'strategy.promoted') return `Cell promoted: ${String(payload.cell ?? payload.strategyId ?? '')}`;
@@ -98,9 +94,16 @@ export const LearningView = (): React.JSX.Element => {
       <Text bold color="cyan">WIN-RATE BY REGIME (ledger)</Text>
       {[...byRegime.entries()].length === 0 ? (
         <Text color="gray" italic>No closed trades attributed to regimes yet.</Text>
-      ) : [...byRegime.entries()].sort((a, b) => b[1].n - a[1].n).map(([regime, { wins, n }]) => (
-        <Text key={regime} color="gray">{regime.padEnd(16)} {bar((wins / n) * 100)} {(wins / n * 100).toFixed(0)}% (n={n})</Text>
-      ))}
+      ) : [...byRegime.entries()].sort((a, b) => b[1].n - a[1].n).map(([regime, { wins, n }]) => {
+        const wr = n > 0 ? (wins / n) * 100 : 0;
+        return (
+          <Box key={regime} gap={1} alignItems="center">
+            <Text color="gray">{regime.padEnd(16)}</Text>
+            <ProgressBar value={wr} width={12} showPercent />
+            <Text color="gray">(n={n})</Text>
+          </Box>
+        );
+      })}
     </Box>
   );
 };
