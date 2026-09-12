@@ -1,0 +1,46 @@
+{
+  "name": "@nemesis-oss/market-research-agent",
+  "version": "0.1.0",
+  "description": "Agentic research interface for deterministic market intelligence",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "cli": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@nemesis-oss/agentic-runtime": "^0.2.1",
+    "@nemesis-oss/market-events": "file:../market-events",
+    "@nemesis-oss/market-research": "file:../market-research",
+    "decimal.js": "^10.4.3",
+    "zod": "^3.24"
+  },
+  "peerDependencies": {
+    "@nemesis-oss/ollama-sdk": "^1.3.0",
+    "@nemesis-oss/market-data": "file:../market-data"
+  },
+  "peerDependenciesMeta": {
+    "@nemesis-oss/ollama-sdk": {
+      "optional": true
+    },
+    "@nemesis-oss/market-data": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@nemesis-oss/market-data": "file:../market-data",
+    "@nemesis-oss/ollama-sdk": "^1.3.0",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@nemesis-oss/hypothesis-engine",
+  "version": "0.1.0",
+  "description": "Hypothesis engine: LLM proposes, deterministic engine tests, WFO+OOS validates",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@nemesis-oss/market-events": "file:../market-events",
+    "@nemesis-oss/market-research": "file:../market-research",
+    "@nemesis-oss/regime-engine": "file:../regime-engine",
+    "@nemesis-oss/market-features": "file:../market-features",
+    "decimal.js": "^10.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@nemesis-oss/market-intelligence-api",
+  "version": "0.1.0",
+  "description": "HTTP API exposing market intelligence: /markets, /events, /state, /research, /strategies",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@nemesis-oss/market-events": "file:../market-events",
+    "@nemesis-oss/market-research": "file:../market-research",
+    "@nemesis-oss/market-data": "file:../market-data",
+    "@nemesis-oss/market-stream": "file:../market-stream",
+    "@nemesis-oss/market-state": "file:../market-state",
+    "@nemesis-oss/strategy-discovery": "file:../strategy-discovery",
+    "@nemesis-oss/strategy-registry": "file:../strategy-registry",
+    "@nemesis-oss/research-memory": "file:../research-memory"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}

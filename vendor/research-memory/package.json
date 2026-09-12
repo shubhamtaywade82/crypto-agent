@@ -1,0 +1,19 @@
+{
+  "name": "@nemesis-oss/research-memory",
+  "version": "0.1.0",
+  "description": "Persistent research memory: hypotheses, experiments, datasets, results",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": {
+    "@nemesis-oss/hypothesis-engine": "file:../hypothesis-engine",
+    "@nemesis-oss/strategy-discovery": "file:../strategy-discovery"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}

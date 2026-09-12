@@ -1,0 +1,30 @@
+{
+  "name": "@nemesis-oss/market-data",
+  "version": "0.1.0",
+  "description": "Exchange data adapters: historical klines, live WebSocket streams, normalization to canonical Candle types",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nemesis-oss/market-events": "file:../market-events",
+    "decimal.js": "^10.4.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  }
+}
