@@ -38,6 +38,9 @@ export const BINANCE_REST_SPOT = 'https://api.binance.com';
 export const BINANCE_REST_FUTURES = 'https://fapi.binance.com';
 export const BINANCE_WS_FUTURES = 'wss://fstream.binance.com';
 
+/** Historical kline source on Binance (USDⓈ-M perp vs spot). */
+export type BinanceKlineMarket = 'spot' | 'usdm_futures';
+
 /** Raw Binance kline array shape (array of arrays). */
 type RawBinanceKline = [
   number, // 0 openTime
@@ -81,6 +84,11 @@ export interface BinanceAdapterConfig {
   readonly spotRestBaseUrl?: string | undefined;
   /** REST futures base. Default {@link BINANCE_REST_FUTURES}. */
   readonly futuresRestBaseUrl?: string | undefined;
+  /**
+   * Where to fetch historical klines. Default `spot`.
+   * Use `usdm_futures` for USDⓈ-M perp candles (`/fapi/v1/klines`) aligned with live WS.
+   */
+  readonly klineMarket?: BinanceKlineMarket | undefined;
   /** Per-request timeout. Default 15_000 ms. */
   readonly requestTimeoutMs?: number | undefined;
   /** Max retries. Default 3. */
@@ -93,17 +101,15 @@ export interface BinanceAdapterConfig {
  * Binance REST adapter. Implements the historical klines, funding, OI, and
  * mark-price surface for both spot and USDⓈ-M futures.
  *
- * Klines are fetched from the spot endpoint by default; if `futuresRestBaseUrl`
- * is used as the kline source, set `useFuturesKlines: true` (not exposed
- * here — callers who need futures klines should construct the adapter with
- * `spotRestBaseUrl` pointed at the futures base URL).
- *
- * Rate-limit handling: pagination with batchLimit ≤ 1000 (spot) / 1500
- * (futures). HTTP 429 triggers backoff honoring `Retry-After`.
+ * Klines default to the spot endpoint. Set `klineMarket: 'usdm_futures'` for
+ * USDⓈ-M perp history (`/fapi/v1/klines` on {@link BINANCE_REST_FUTURES}).
+ * Rate-limit handling: pagination with batchLimit ≤ 1000 (spot) / 1500 (futures).
+ * HTTP 429 triggers backoff honoring `Retry-After`.
  */
 export class BinanceRestAdapter {
   readonly spotRest: string;
   readonly futuresRest: string;
+  readonly klineMarket: BinanceKlineMarket;
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
   private readonly retryBackoffMs: number;
@@ -111,6 +117,7 @@ export class BinanceRestAdapter {
   constructor(config: BinanceAdapterConfig = {}) {
     this.spotRest = config.spotRestBaseUrl ?? BINANCE_REST_SPOT;
     this.futuresRest = config.futuresRestBaseUrl ?? BINANCE_REST_FUTURES;
+    this.klineMarket = config.klineMarket ?? 'spot';
     this.timeoutMs = config.requestTimeoutMs ?? 15_000;
     this.maxRetries = config.maxRetries ?? 3;
     this.retryBackoffMs = config.retryBackoffMs ?? 500;
@@ -124,14 +131,18 @@ export class BinanceRestAdapter {
     options: FetchKlinesOptions,
   ): Promise<readonly Candle[]> {
     const interval = BINANCE_INTERVAL_MAP[options.timeframe];
-    const batchLimit = Math.min(options.batchLimit ?? 1000, 1000);
+    const useFutures = this.klineMarket === 'usdm_futures';
+    const maxBatch = useFutures ? 1500 : 1000;
+    const batchLimit = Math.min(options.batchLimit ?? maxBatch, maxBatch);
+    const restBase = useFutures ? this.futuresRest : this.spotRest;
+    const klinePath = useFutures ? '/fapi/v1/klines' : '/api/v3/klines';
 
     const all: Candle[] = [];
     const seen = new Set<number>();
     let currentStart = options.startTime;
 
     while (currentStart < options.endTime) {
-      const url = new URL(`${this.spotRest}/api/v3/klines`);
+      const url = new URL(`${restBase}${klinePath}`);
       url.searchParams.set('symbol', options.symbol);
       url.searchParams.set('interval', interval);
       url.searchParams.set('startTime', String(currentStart));

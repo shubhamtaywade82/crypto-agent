@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { detectFvg, detectSwings, detectStructureBreaks, detectBos, detectChoch, detectMss, detectOrderBlocks, detectLiquiditySweeps, detectDisplacement, } from '@nemesis-oss/market-events';
+import { detectFvg, detectSwings, detectStructureBreaks, detectBos, detectChoch, detectMss, detectOrderBlocks, detectLiquiditySweeps, detectDisplacement, detectVsaEvents, } from '@nemesis-oss/market-events';
 import { extractContextSnapshot, runObservationStudy, runUniversalStudy, analyzeEventPairInteraction, analyzeAnchorInteraction, evaluateNegativeEvidenceImpact, runWalkForwardValidation, formatStabilityMarkdown, } from '@nemesis-oss/market-research';
 import { ToolkitCatalogue, } from '@nemesis-oss/agentic-runtime';
 import { toHtfCandlesMap } from './context.js';
@@ -72,6 +72,8 @@ function getEvents(ctx, eventType) {
             return detectLiquiditySweeps(candles, swings, { symbol, timeframe });
         case 'displacement':
             return detectDisplacement(candles, { symbol, timeframe });
+        case 'vsa':
+            return detectVsaEvents(candles, { symbol, timeframe });
         default: {
             // exhaustive at compile time; runtime guard for safety
             const _exhaustive = eventType;

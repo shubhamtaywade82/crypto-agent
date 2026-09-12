@@ -10,6 +10,7 @@ import { defaultModel, ollamaClient } from '../config.js';
 import { eventTypesForCouncil } from './mi-evidence.js';
 import { getMiEvidenceCache, warmMiEvidence } from './mi-evidence-cache.js';
 import { sendCouncilTelegram } from '../notifications/council-telegram.js';
+import { sendMarketEventAlert, sendTriggerAlert } from '../notifications/signal-telegram.js';
 import type { BinanceMarketStream } from '../infrastructure/binance/market-stream.js';
 import { kernelWatchSymbols } from '../kernel-streams.js';
 import { emitCouncilPipelineTrace } from './pipeline-trace-bus.js';
@@ -28,6 +29,15 @@ const candleTfs = (): Set<Timeframe> => {
 const miEventsEnabled = (): boolean => process.env.MI_EVENT_COUNCIL !== 'false';
 
 const candleCloseCouncil = (): boolean => process.env.COUNCIL_CANDLE_CLOSE === 'true';
+
+const llmMinConfidence = (): number => Number(process.env.COUNCIL_LLM_MIN_CONFIDENCE ?? 0.75);
+
+const shouldRunLlm = (trigger: CouncilTrigger, trace: PipelineTrace): boolean => {
+  if (process.env.COUNCIL_LLM_ENABLED === 'false') return false;
+  if (trigger.type !== 'MARKET_EVENT') return true;
+  if (trace.setups.length === 0) return false;
+  return trace.setups.some((s) => s.confidence >= llmMinConfidence());
+};
 
 const symbolOf = (trigger: CouncilTrigger): string => {
   if (trigger.type === 'PRICE_WATCH') return trigger.event.condition.symbol;
@@ -121,6 +131,7 @@ export class EventCouncil {
         type: 'mi.event.detected', symbol: sym,
         payload: { timeframe, eventType: ev.eventType, eventId: ev.eventId, label: ev.label },
       });
+      await sendMarketEventAlert(sym, timeframe, ev);
       await this.dispatch({
         type: 'MARKET_EVENT', symbol: sym, timeframe,
         eventType: ev.eventType, eventId: ev.eventId,
@@ -135,12 +146,14 @@ export class EventCouncil {
     const prev = this.lastRegime.get(symbol);
     this.lastRegime.set(symbol, regime);
     if (prev && prev !== regime) {
+      await sendTriggerAlert({ type: 'REGIME_CHANGE', symbol, from: prev, to: regime });
       await this.dispatch({ type: 'REGIME_CHANGE', symbol, from: prev, to: regime });
     }
     const count = detectSetups(mtf, this.kernel.limits).length;
     const prevCount = this.lastSetupCount.get(symbol) ?? 0;
     this.lastSetupCount.set(symbol, count);
     if (count > 0 && count > prevCount) {
+      await sendTriggerAlert({ type: 'SETUP_DETECTED', symbol, count });
       await this.dispatch({ type: 'SETUP_DETECTED', symbol, count });
     }
   }
@@ -157,10 +170,16 @@ export class EventCouncil {
       this.markFired(trigger);
       const types = eventTypesForCouncil(trigger, trace.setups);
       const evidence = await getMiEvidenceCache().blockFor(this.kernel, symbol, types);
-      const analysis = trace.state
+      const analysis = trace.state && shouldRunLlm(trigger, trace)
         ? await analyzeMarket(ollamaClient, defaultModel, trace.state, evidence)
         : trace.analysis;
-      await sendCouncilTelegram(trigger, trace, analysis, evidence);
+      const notifyCouncil =
+        alwaysNotify(trace.status) ||
+        shouldRunLlm(trigger, trace) ||
+        trigger.type === 'PRICE_WATCH';
+      if (notifyCouncil) {
+        await sendCouncilTelegram(trigger, trace, analysis, evidence);
+      }
       this.kernel.store.append({
         type: 'council.notified', symbol,
         payload: { trigger: trigger.type, status: trace.status },

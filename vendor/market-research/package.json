@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
+    "@nemesis-oss/market-data": "file:../market-data",
     "@nemesis-oss/market-events": "file:../market-events",
     "decimal.js": "^10.4.3"
   }

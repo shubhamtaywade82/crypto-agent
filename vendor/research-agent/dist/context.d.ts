@@ -12,7 +12,7 @@ import type { HtfCandlesMap } from '@nemesis-oss/market-research';
  * and every numerical observation it produces must come from a tool call.
  */
 export interface ResearchContext {
-    /** Trading pair, e.g. "SOLUSDT" or "BTCUSDT". */
+    /** Trading pair, e.g. "SOLUSDT" or "ETHUSDT". */
     readonly symbol: string;
     /** Timeframe of the primary working dataset. */
     readonly timeframe: Timeframe;

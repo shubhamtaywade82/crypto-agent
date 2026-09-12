@@ -1,4 +1,4 @@
-import type { Candle, Timeframe } from '@nemesis-oss/market-events';
+import type { Timeframe } from '@nemesis-oss/market-events';
 
 export interface HistoricalFetcherOptions {
   readonly symbol: string;

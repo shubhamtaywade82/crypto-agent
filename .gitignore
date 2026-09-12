@@ -146,4 +146,5 @@ vite.config.ts.timestamp-*
 # Vendored @nemesis-oss packages ship prebuilt dist/ (built from
 # shubhamtaywade82/market-intelligence) so CI, Docker, and fresh clones
 # resolve them without external paths.
-!vendor/*/dist/
+vendor
+# !vendor/*/dist/

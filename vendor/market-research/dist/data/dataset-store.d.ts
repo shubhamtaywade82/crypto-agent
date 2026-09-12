@@ -3,7 +3,7 @@ import type { StoredDatasetMetadata } from './types.js';
 /**
  * Saves immutable normalized candles and metadata to a JSON file.
  */
-export declare function saveDataset(storageDir: string, symbol: string, timeframe: Timeframe, candles: readonly Candle[]): Promise<string>;
+export declare function saveDataset(storageDir: string, symbol: string, timeframe: Timeframe, candles: readonly Candle[], cacheLabel?: string): Promise<string>;
 /**
  * Loads a cached immutable dataset from disk into Decimal Candle instances.
  */

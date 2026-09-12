@@ -9,6 +9,7 @@ import {
   detectOrderBlocks,
   detectLiquiditySweeps,
   detectDisplacement,
+  detectVsaEvents,
   type BaseEvent,
   type Candle,
   type Timeframe,
@@ -119,6 +120,9 @@ function getEvents(
 
     case 'displacement':
       return detectDisplacement(candles, { symbol, timeframe });
+
+    case 'vsa':
+      return detectVsaEvents(candles, { symbol, timeframe });
 
     default: {
       // exhaustive at compile time; runtime guard for safety

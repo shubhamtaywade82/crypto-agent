@@ -10,7 +10,7 @@ import type {
   OpenInterestSnapshot,
   StreamSubscription,
 } from '../types.js';
-import type { BinanceAdapterConfig } from './rest.js';
+import type { BinanceAdapterConfig, BinanceKlineMarket } from './rest.js';
 import {
   BINANCE_REST_FUTURES,
   BINANCE_REST_SPOT,
@@ -20,28 +20,31 @@ import {
 import { subscribeBinanceKlines, type BinanceWsConfig } from './ws.js';
 
 /**
- * Binance adapter: implements the full {@link ExchangeAdapter} surface
- * using spot REST for klines and USDⓈ-M futures REST for funding/OI/mark.
- *
- * Live klines come from the futures WebSocket stream, which sends a
- * kline message on every update but only closed klines are forwarded to
- * the consumer.
+ * Binance adapter: implements the full {@link ExchangeAdapter} surface.
+ * Default historical klines are **spot**; live closed candles use USDⓈ-M futures WS.
+ * For perp backtests aligned with WS, use {@link createBinanceFuturesAdapter}.
  */
 export class BinanceAdapter implements ExchangeAdapter {
   readonly exchange: ExchangeId = 'binance';
   readonly restBaseUrl: string;
   readonly wsBaseUrl: string;
+  readonly klineMarket: BinanceKlineMarket;
 
   private readonly rest: BinanceRestAdapter;
   private readonly wsConfig: BinanceWsConfig;
 
   constructor(config: BinanceAdapterConfig & BinanceWsConfig = {}) {
+    const klineMarket = config.klineMarket ?? 'spot';
+    this.klineMarket = klineMarket;
     const spotRest = config.spotRestBaseUrl ?? BINANCE_REST_SPOT;
-    this.restBaseUrl = spotRest;
+    this.restBaseUrl = klineMarket === 'usdm_futures'
+      ? (config.futuresRestBaseUrl ?? BINANCE_REST_FUTURES)
+      : spotRest;
     this.wsBaseUrl = config.wsBaseUrl ?? BINANCE_WS_FUTURES;
     this.rest = new BinanceRestAdapter({
       spotRestBaseUrl: spotRest,
       futuresRestBaseUrl: config.futuresRestBaseUrl ?? BINANCE_REST_FUTURES,
+      klineMarket,
       requestTimeoutMs: config.requestTimeoutMs,
       maxRetries: config.maxRetries,
       retryBackoffMs: config.retryBackoffMs,
@@ -81,4 +84,11 @@ export function createBinanceAdapter(
   config?: BinanceAdapterConfig & BinanceWsConfig,
 ): BinanceAdapter {
   return new BinanceAdapter(config);
+}
+
+/** USDⓈ-M futures REST klines + futures WS + funding/OI/mark (perp research default). */
+export function createBinanceFuturesAdapter(
+  config?: BinanceAdapterConfig & BinanceWsConfig,
+): BinanceAdapter {
+  return new BinanceAdapter({ ...config, klineMarket: 'usdm_futures' });
 }

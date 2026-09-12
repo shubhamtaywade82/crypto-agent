@@ -1,6 +1,7 @@
 import type { Timeframe } from '@nemesis-oss/market-events';
 import type { ExchangeAdapter } from '@nemesis-oss/market-data';
 import { type ResearchAgent, type ResearchAgentOptions } from './agent.js';
+import type { ResearchContext } from './context.js';
 /**
  * Options for {@link createResearchAgentFromExchange}.
  */
@@ -27,6 +28,8 @@ export interface ResearchAgentFromExchangeOptions {
      */
     readonly batchLimit?: number | undefined;
 }
+export type BuildResearchContextFromExchangeOptions = Omit<ResearchAgentFromExchangeOptions, 'agentOptions'>;
+export declare function buildResearchContextFromExchange(options: BuildResearchContextFromExchangeOptions): Promise<ResearchContext>;
 /**
  * Construct a {@link ResearchAgent} bound to historical candles fetched
  * directly from an exchange adapter. Convenience wrapper that:
@@ -46,7 +49,7 @@ export interface ResearchAgentFromExchangeOptions {
  *
  * const agent = await createResearchAgentFromExchange({
  *   adapter: createBinanceAdapter(),
- *   symbol: 'BTCUSDT',
+ *   symbol: 'ETHUSDT',
  *   timeframe: '15m',
  *   startTime: Date.now() - 30 * 24 * 60 * 60 * 1000,  // 30 days
  *   endTime: Date.now(),
@@ -54,7 +57,7 @@ export interface ResearchAgentFromExchangeOptions {
  * });
  *
  * const result = await agent.research(
- *   'Does bullish FVG continuation on BTCUSDT 15m provide statistically significant 2R edge?',
+ *   'Does bullish FVG continuation on ETHUSDT 15m provide statistically significant 2R edge?',
  * );
  * console.log(result.report);
  * ```

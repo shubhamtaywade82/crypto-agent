@@ -1,16 +1,41 @@
 import type { WatchTriggerEvent } from '../types.js';
 
+export type TelegramBotKind = 'alert' | 'trading';
+
 interface TelegramConfig {
   readonly botToken: string;
   readonly chatId: string;
 }
 
-const getConfig = (): TelegramConfig | null => {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!botToken || !chatId) return null;
-  return { botToken, chatId };
+export interface TelegramSendOptions {
+  readonly channel?: TelegramBotKind;
+  readonly silent?: boolean;
+}
+
+const chatId = (): string | undefined => process.env.TELEGRAM_CHAT_ID?.trim();
+
+const resolveBotToken = (kind: TelegramBotKind): string | undefined => {
+  if (kind === 'trading') {
+    return (
+      process.env.TELEGRAM_TRADING_BOT_TOKEN?.trim() ??
+      process.env.TELEGRAM_BOT_TOKEN?.trim()
+    );
+  }
+  return (
+    process.env.TELEGRAM_ALERTBOT_BOT_TOKEN?.trim() ??
+    process.env.TELEGRAM_BOT_TOKEN?.trim()
+  );
 };
+
+const getSendConfig = (kind: TelegramBotKind): TelegramConfig | null => {
+  const id = chatId();
+  const botToken = resolveBotToken(kind);
+  if (!botToken || !id) return null;
+  return { botToken, chatId: id };
+};
+
+/** @deprecated use getSendConfig('alert'|'trading') — kept for tests */
+const getConfig = (): TelegramConfig | null => getSendConfig('alert');
 
 export const escapeHtml = (text: string): string =>
   text
@@ -18,24 +43,41 @@ export const escapeHtml = (text: string): string =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-// Formats the agent's final analysis into a clean Telegram message
-const formatAnalysisCard = (
-  event: WatchTriggerEvent,
-  analysis: string
-): string => {
+export const telegramConfigured = (): boolean =>
+  Boolean(chatId() && (resolveBotToken('alert') || resolveBotToken('trading')));
+
+const postMessage = async (text: string, kind: TelegramBotKind, silent: boolean): Promise<boolean> => {
+  const config = getSendConfig(kind);
+  if (!config) return false;
+  const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: config.chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        disable_notification: silent,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+};
+
+const formatAnalysisCard = (event: WatchTriggerEvent, analysis: string): string => {
   const { condition, currentPrice, triggeredAt } = event;
   const direction = condition.type === 'price_above' ? '📈 BREAKOUT' : '📉 BREAKDOWN';
   const time = new Date(triggeredAt).toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
     hour12: false,
   });
-
-  // Trim analysis to Telegram's 4096 char limit (minus card overhead)
   const maxLen = 3200;
-  const trimmed = analysis.length > maxLen
-    ? `${analysis.slice(0, maxLen)}…`
-    : analysis;
-
+  const trimmed = analysis.length > maxLen ? `${analysis.slice(0, maxLen)}…` : analysis;
   return [
     `${direction} <b>${escapeHtml(condition.symbol)}</b>`,
     '',
@@ -46,7 +88,7 @@ const formatAnalysisCard = (
     '',
     '─'.repeat(30),
     '',
-    `<b>🤖 Agent Analysis:</b>`,
+    '<b>🤖 Agent Analysis:</b>',
     '',
     `<pre>${escapeHtml(trimmed)}</pre>`,
   ].join('\n');
@@ -56,73 +98,26 @@ export const sendTelegramAlert = async (
   event: WatchTriggerEvent,
   analysis: string
 ): Promise<boolean> => {
-  const config = getConfig();
-  if (!config) return false;
-
+  if (!getSendConfig('trading') && !getSendConfig('alert')) return false;
   const text = formatAnalysisCard(event, analysis);
-  const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
-
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: config.chatId,
-        text,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  const channel: TelegramBotKind = getSendConfig('trading') ? 'trading' : 'alert';
+  return postMessage(text, channel, false);
 };
 
-/** Send arbitrary HTML to Telegram (council cards, status, etc.). */
-export const sendTelegramHtml = async (text: string, silent = false): Promise<boolean> => {
-  const config = getConfig();
-  if (!config) return false;
-  const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: config.chatId, text, parse_mode: 'HTML',
-        disable_web_page_preview: true, disable_notification: silent,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-};
-
-// Lightweight status notification (watcher connected, errors, etc.)
-export const sendTelegramStatus = async (
-  message: string
+export const sendTelegramHtml = async (
+  text: string,
+  silentOrOpts: boolean | TelegramSendOptions = false
 ): Promise<boolean> => {
-  const config = getConfig();
-  if (!config) return false;
-
-  const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: config.chatId,
-        text: `🤖 <b>Crypto Agent</b>\n\n${escapeHtml(message)}`,
-        parse_mode: 'HTML',
-        disable_notification: true,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  const opts: TelegramSendOptions =
+    typeof silentOrOpts === 'boolean' ? { silent: silentOrOpts } : silentOrOpts;
+  const channel = opts.channel ?? 'alert';
+  return postMessage(text, channel, opts.silent ?? false);
 };
+
+export const sendTelegramStatus = async (message: string): Promise<boolean> =>
+  sendTelegramHtml(`🤖 <b>Crypto Agent</b>\n\n${escapeHtml(message)}`, {
+    channel: 'alert',
+    silent: true,
+  });
+
+export { getConfig };

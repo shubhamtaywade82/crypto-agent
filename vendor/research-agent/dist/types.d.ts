@@ -14,6 +14,6 @@ export type { InteractionPairAnalysis, ConditionalInteractionResult, AnchorInter
 export type { NegativeEvidenceImpactResult, NegativeEvidenceFlags, } from '@nemesis-oss/market-research';
 export type { StabilitySummary, WalkForwardWindow, WalkForwardOptions, } from '@nemesis-oss/market-research';
 /** Event types the agent can dispatch to deterministic detectors. */
-export declare const DETECTABLE_EVENT_TYPES: readonly ["fvg", "bos", "choch", "mss", "order_block", "liquidity_sweep", "displacement"];
+export declare const DETECTABLE_EVENT_TYPES: readonly ["fvg", "bos", "choch", "mss", "order_block", "liquidity_sweep", "displacement", "vsa"];
 export type DetectableEventType = (typeof DETECTABLE_EVENT_TYPES)[number];
 //# sourceMappingURL=types.d.ts.map

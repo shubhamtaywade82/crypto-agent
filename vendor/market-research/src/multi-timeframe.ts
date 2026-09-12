@@ -1,4 +1,3 @@
-import { Decimal } from 'decimal.js';
 import type { Candle, Timeframe } from '@nemesis-oss/market-events';
 import { calculateCausalAtr } from './causal-atr.js';
 import type { HtfRegimeSnapshot } from './types.js';

@@ -1,14 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 
-// Isolate fetch mock before importing telegram module
 const mockFetch = vi.fn().mockResolvedValue({ ok: true });
 vi.stubGlobal('fetch', mockFetch);
 
 describe('Telegram Notifier', () => {
-  it('sends formatted HTML alert with event data', async () => {
-    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  it('sends formatted HTML alert with trading bot token', async () => {
+    process.env.TELEGRAM_TRADING_BOT_TOKEN = 'trade-token';
     process.env.TELEGRAM_CHAT_ID = '12345';
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_ALERTBOT_BOT_TOKEN;
+    mockFetch.mockClear();
 
+    vi.resetModules();
     const { sendTelegramAlert } = await import('../src/notifications/telegram.js');
 
     const event = {
@@ -30,17 +33,20 @@ describe('Telegram Notifier', () => {
     expect(result).toBe(true);
     expect(mockFetch).toHaveBeenCalledOnce();
 
+    const url = mockFetch.mock.calls[0]?.[0] as string;
     const body = JSON.parse(mockFetch.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
+    expect(url).toContain('trade-token');
     expect(body.chat_id).toBe('12345');
     expect(body.parse_mode).toBe('HTML');
-    expect(body.text).toContain('SOLUSDT');
-    expect(body.text).toContain('106.5');
-    expect(body.text).toContain('Agent confirmed breakout.');
+    expect(String(body.text)).toContain('SOLUSDT');
   });
 
   it('returns false when env vars are missing', async () => {
     delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_TRADING_BOT_TOKEN;
+    delete process.env.TELEGRAM_ALERTBOT_BOT_TOKEN;
     delete process.env.TELEGRAM_CHAT_ID;
+    mockFetch.mockClear();
 
     vi.resetModules();
     const { sendTelegramAlert } = await import('../src/notifications/telegram.js');

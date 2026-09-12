@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { detectFvg, detectSwings, detectStructureBreaks, detectBos, detectChoch, detectMss, detectOrderBlocks, detectLiquiditySweeps, detectDisplacement } from '@nemesis-oss/market-events';
+import { detectFvg, detectSwings, detectStructureBreaks, detectBos, detectChoch, detectMss, detectOrderBlocks, detectLiquiditySweeps, detectDisplacement, detectVsaEvents } from '@nemesis-oss/market-events';
 import { evaluateEventOutcome, DEFAULT_OUTCOME_CONFIG } from './outcome-evaluators.js';
 import { generateMatchedControls } from './matched-controls.js';
 import { calculateWilsonInterval, calculateBootstrapMedianCi, compareAgainstBaseline } from './statistical-significance.js';
@@ -133,7 +133,8 @@ export function runObservationStudy(candles, options) {
         ['mss', detectMss(candles, swings, { symbol, timeframe })],
         ['order_block', detectOrderBlocks(candles, allBreaks, { symbol, timeframe })],
         ['liquidity_sweep', detectLiquiditySweeps(candles, swings, { symbol, timeframe })],
-        ['displacement', detectDisplacement(candles, { symbol, timeframe })]
+        ['displacement', detectDisplacement(candles, { symbol, timeframe })],
+        ['vsa', detectVsaEvents(candles, { symbol, timeframe })]
     ];
     const evals = components.map(([eventType, events]) => evaluateStudyComponent({ symbol, timeframe, eventType, config, htfCandlesMap }, events, candles));
     const matchRatios = new Map(evals.map((e, i) => [components[i][0], e.matchRatio]));

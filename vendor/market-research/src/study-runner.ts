@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { Decimal } from 'decimal.js';
 import type { Candle, Timeframe, BaseEvent } from '@nemesis-oss/market-events';
-import { detectFvg, detectSwings, detectStructureBreaks, detectBos, detectChoch, detectMss, detectOrderBlocks, detectLiquiditySweeps, detectDisplacement } from '@nemesis-oss/market-events';
+import { detectFvg, detectSwings, detectStructureBreaks, detectBos, detectChoch, detectMss, detectOrderBlocks, detectLiquiditySweeps, detectDisplacement, detectVsaEvents } from '@nemesis-oss/market-events';
 import { evaluateEventOutcome, DEFAULT_OUTCOME_CONFIG } from './outcome-evaluators.js';
 import { generateMatchedControls, type MatchedControlObservation } from './matched-controls.js';
 import { calculateWilsonInterval, calculateBootstrapMedianCi, compareAgainstBaseline, type ClusterObservation } from './statistical-significance.js';
@@ -202,7 +201,8 @@ export function runObservationStudy(candles: readonly Candle[], options: RunStud
     ['mss', detectMss(candles, swings, { symbol, timeframe })],
     ['order_block', detectOrderBlocks(candles, allBreaks, { symbol, timeframe })],
     ['liquidity_sweep', detectLiquiditySweeps(candles, swings, { symbol, timeframe })],
-    ['displacement', detectDisplacement(candles, { symbol, timeframe })]
+    ['displacement', detectDisplacement(candles, { symbol, timeframe })],
+    ['vsa', detectVsaEvents(candles, { symbol, timeframe })]
   ];
 
   const evals = components.map(([eventType, events]) =>

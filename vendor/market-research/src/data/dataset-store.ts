@@ -25,10 +25,13 @@ export async function saveDataset(
   storageDir: string,
   symbol: string,
   timeframe: Timeframe,
-  candles: readonly Candle[]
+  candles: readonly Candle[],
+  cacheLabel?: string
 ): Promise<string> {
   await fs.mkdir(storageDir, { recursive: true });
-  const filename = `${symbol.toUpperCase()}-${timeframe}.json`;
+  const filename = cacheLabel
+    ? `${symbol.toUpperCase()}-${timeframe}-${cacheLabel}.json`
+    : `${symbol.toUpperCase()}-${timeframe}.json`;
   const filePath = path.join(storageDir, filename);
 
   const payload: DatasetFilePayload = {

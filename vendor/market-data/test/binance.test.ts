@@ -59,18 +59,18 @@ describe('market-data / BinanceRestAdapter', () => {
 
   it('fetchKlines paginates and normalizes to Decimal-typed Candles', async () => {
     spy = mockHttpGetJson({
-      '/api/v3/klines?symbol=BTCUSDT&interval=15m&startTime=1000&endTime=5000&limit=2': [
+      '/api/v3/klines?symbol=ETHUSDT&interval=15m&startTime=1000&endTime=5000&limit=2': [
         rawKline(1000, '100', '102', '99', '101', '10', 1099),
         rawKline(2000, '101', '103', '100', '102', '12', 2099),
       ],
-      '/api/v3/klines?symbol=BTCUSDT&interval=15m&startTime=2100&endTime=5000&limit=2': [
+      '/api/v3/klines?symbol=ETHUSDT&interval=15m&startTime=2100&endTime=5000&limit=2': [
         rawKline(3000, '102', '104', '101', '103', '14', 3099),
       ],
     });
 
     const adapter = new BinanceRestAdapter({ spotRestBaseUrl: 'https://mock' });
     const candles = await adapter.fetchKlines({
-      symbol: 'BTCUSDT',
+      symbol: 'ETHUSDT',
       timeframe: '15m',
       startTime: 1000,
       endTime: 5000,
@@ -83,6 +83,29 @@ describe('market-data / BinanceRestAdapter', () => {
     expect(candles[0]!.close.equals(new Decimal('101'))).toBe(true);
     expect(candles[0]!.timestamp).toBeLessThan(candles[1]!.timestamp);
     expect(candles[1]!.timestamp).toBeLessThan(candles[2]!.timestamp);
+  });
+
+  it('fetchKlines uses USD-M futures endpoint when klineMarket is usdm_futures', async () => {
+    spy = mockHttpGetJson({
+      '/fapi/v1/klines?symbol=BTCUSDT&interval=15m&startTime=1000&endTime=5000&limit=1500': [
+        rawKline(1000, '100', '102', '99', '101', '10', 1099),
+      ],
+    });
+
+    const adapter = new BinanceRestAdapter({
+      spotRestBaseUrl: 'https://mock-spot',
+      futuresRestBaseUrl: 'https://mock-fapi',
+      klineMarket: 'usdm_futures',
+    });
+    const candles = await adapter.fetchKlines({
+      symbol: 'BTCUSDT',
+      timeframe: '15m',
+      startTime: 1000,
+      endTime: 5000,
+    });
+
+    expect(candles.length).toBe(1);
+    expect(spy).toHaveBeenCalled();
   });
 
   it('deduplicates candles with the same timestamp across pages', async () => {
@@ -120,14 +143,14 @@ describe('market-data / BinanceRestAdapter', () => {
     });
 
     const adapter = new BinanceRestAdapter({ futuresRestBaseUrl: 'https://mock' });
-    const result = await adapter.fetchFundingRate('BTCUSDT');
+    const result = await adapter.fetchFundingRate('ETHUSDT');
     expect(result).toBeNull();
   });
 
   it('fetchFundingRate parses funding rate response', async () => {
     spy = mockHttpGetJson({
-      '/fapi/v1/premiumIndex?symbol=BTCUSDT': {
-        symbol: 'BTCUSDT',
+      '/fapi/v1/premiumIndex?symbol=ETHUSDT': {
+        symbol: 'ETHUSDT',
         markPrice: '50000.0',
         indexPrice: '49999.0',
         lastFundingRate: '0.0001',
@@ -136,23 +159,23 @@ describe('market-data / BinanceRestAdapter', () => {
     });
 
     const adapter = new BinanceRestAdapter({ futuresRestBaseUrl: 'https://mock' });
-    const result = await adapter.fetchFundingRate('BTCUSDT');
+    const result = await adapter.fetchFundingRate('ETHUSDT');
     expect(result).not.toBeNull();
-    expect(result!.symbol).toBe('BTCUSDT');
+    expect(result!.symbol).toBe('ETHUSDT');
     expect(result!.fundingRate).toBeCloseTo(0.0001, 10);
     expect(result!.markPrice).toBeCloseTo(50_000, 1);
   });
 
   it('fetchOpenInterest parses OI response', async () => {
     spy = mockHttpGetJson({
-      '/fapi/v1/openInterest?symbol=BTCUSDT': {
+      '/fapi/v1/openInterest?symbol=ETHUSDT': {
         openInterest: '100000.5',
         time: 1700000000000,
       },
     });
 
     const adapter = new BinanceRestAdapter({ futuresRestBaseUrl: 'https://mock' });
-    const result = await adapter.fetchOpenInterest('BTCUSDT');
+    const result = await adapter.fetchOpenInterest('ETHUSDT');
     expect(result).not.toBeNull();
     expect(result!.openInterest).toBeCloseTo(100_000.5, 1);
   });
@@ -174,9 +197,9 @@ describe('market-data / createExchangeAdapter', () => {
     expect(adapter.exchange).toBe('bybit');
     await expect(
       adapter.subscribeKlines({
-        symbol: 'BTCUSDT',
+        symbol: 'ETHUSDT',
         timeframe: '15m',
-        onCandle: () => {},
+        onCandle: () => { },
       }),
     ).rejects.toThrow(/WebSocket adapter not yet implemented/);
   });
@@ -201,7 +224,7 @@ const { mockHandlers } = vi.hoisted(() => ({
 
 vi.mock('ws', () => ({
   WebSocket: class {
-    constructor() {}
+    constructor() { }
     on(event: string, handler: (...args: unknown[]) => void) {
       (mockHandlers[event] ??= []).push(handler);
     }
@@ -225,7 +248,7 @@ describe('market-data / BinanceKlineStream', () => {
 
     const stream = new BinanceKlineStream(
       {
-        symbol: 'BTCUSDT',
+        symbol: 'ETHUSDT',
         timeframe: '15m',
         onCandle: (c) => receivedCandles.push(c),
         onStatus: (s) => statuses.push(s),
@@ -244,9 +267,9 @@ describe('market-data / BinanceKlineStream', () => {
           JSON.stringify({
             e: 'kline',
             E: 1,
-            s: 'BTCUSDT',
+            s: 'ETHUSDT',
             k: {
-              t: 1000, T: 1099, s: 'BTCUSDT', i: '15m',
+              t: 1000, T: 1099, s: 'ETHUSDT', i: '15m',
               o: '100', c: '101', h: '102', l: '99', v: '10',
               x: false, q: '',
             },
@@ -263,9 +286,9 @@ describe('market-data / BinanceKlineStream', () => {
           JSON.stringify({
             e: 'kline',
             E: 2,
-            s: 'BTCUSDT',
+            s: 'ETHUSDT',
             k: {
-              t: 1000, T: 1099, s: 'BTCUSDT', i: '15m',
+              t: 1000, T: 1099, s: 'ETHUSDT', i: '15m',
               o: '100', c: '101', h: '102', l: '99', v: '10',
               x: true, q: '',
             },

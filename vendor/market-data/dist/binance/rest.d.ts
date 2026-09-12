@@ -12,11 +12,18 @@ export declare const BINANCE_INTERVAL_MAP: Readonly<Record<Timeframe, string>>;
 export declare const BINANCE_REST_SPOT = "https://api.binance.com";
 export declare const BINANCE_REST_FUTURES = "https://fapi.binance.com";
 export declare const BINANCE_WS_FUTURES = "wss://fstream.binance.com";
+/** Historical kline source on Binance (USDⓈ-M perp vs spot). */
+export type BinanceKlineMarket = 'spot' | 'usdm_futures';
 export interface BinanceAdapterConfig {
     /** REST spot base. Default {@link BINANCE_REST_SPOT}. */
     readonly spotRestBaseUrl?: string | undefined;
     /** REST futures base. Default {@link BINANCE_REST_FUTURES}. */
     readonly futuresRestBaseUrl?: string | undefined;
+    /**
+     * Where to fetch historical klines. Default `spot`.
+     * Use `usdm_futures` for USDⓈ-M perp candles (`/fapi/v1/klines`) aligned with live WS.
+     */
+    readonly klineMarket?: BinanceKlineMarket | undefined;
     /** Per-request timeout. Default 15_000 ms. */
     readonly requestTimeoutMs?: number | undefined;
     /** Max retries. Default 3. */
@@ -28,17 +35,15 @@ export interface BinanceAdapterConfig {
  * Binance REST adapter. Implements the historical klines, funding, OI, and
  * mark-price surface for both spot and USDⓈ-M futures.
  *
- * Klines are fetched from the spot endpoint by default; if `futuresRestBaseUrl`
- * is used as the kline source, set `useFuturesKlines: true` (not exposed
- * here — callers who need futures klines should construct the adapter with
- * `spotRestBaseUrl` pointed at the futures base URL).
- *
- * Rate-limit handling: pagination with batchLimit ≤ 1000 (spot) / 1500
- * (futures). HTTP 429 triggers backoff honoring `Retry-After`.
+ * Klines default to the spot endpoint. Set `klineMarket: 'usdm_futures'` for
+ * USDⓈ-M perp history (`/fapi/v1/klines` on {@link BINANCE_REST_FUTURES}).
+ * Rate-limit handling: pagination with batchLimit ≤ 1000 (spot) / 1500 (futures).
+ * HTTP 429 triggers backoff honoring `Retry-After`.
  */
 export declare class BinanceRestAdapter {
     readonly spotRest: string;
     readonly futuresRest: string;
+    readonly klineMarket: BinanceKlineMarket;
     private readonly timeoutMs;
     private readonly maxRetries;
     private readonly retryBackoffMs;

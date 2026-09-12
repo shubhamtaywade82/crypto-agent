@@ -61,6 +61,7 @@ export const DETECTABLE_EVENT_TYPES = [
   'order_block',
   'liquidity_sweep',
   'displacement',
+  'vsa',
 ] as const;
 
 export type DetectableEventType = (typeof DETECTABLE_EVENT_TYPES)[number];

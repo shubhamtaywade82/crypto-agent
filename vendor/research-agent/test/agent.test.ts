@@ -33,7 +33,7 @@ function makeCandles(count: number, startTs = 1_700_000_000_000): Candle[] {
 
 function makeContext(candleCount = 300): ResearchContext {
   return {
-    symbol: 'BTCUSDT',
+    symbol: 'ETHUSDT',
     timeframe: '15m',
     candles: makeCandles(candleCount),
   };
@@ -66,7 +66,7 @@ describe('research-agent', () => {
     const res = await agent.invokeTool('dataset_summary', {});
     expect(res.success).toBe(true);
     const out = res.output as { symbol: string; candleCount: number };
-    expect(out.symbol).toBe('BTCUSDT');
+    expect(out.symbol).toBe('ETHUSDT');
     expect(out.candleCount).toBe(300);
   });
 

@@ -66,7 +66,7 @@ describe('research-agent tools', () => {
     expect(Array.isArray(res.output)).toBe(true);
     expect(res.output).toEqual([
       'fvg', 'bos', 'choch', 'mss', 'order_block',
-      'liquidity_sweep', 'displacement',
+      'liquidity_sweep', 'displacement', 'vsa',
     ]);
   });
 
@@ -142,9 +142,9 @@ describe('research-agent tools', () => {
       matchRatios: Record<string, number>;
     };
     expect(Array.isArray(out.results)).toBe(true);
-    expect(out.results.length).toBe(7);
+    expect(out.results.length).toBe(8);
     expect(out.multipleTesting?.procedure).toBe('benjamini_hochberg');
-    expect(Object.keys(out.matchRatios).length).toBe(7);
+    expect(Object.keys(out.matchRatios).length).toBe(8);
     const json = JSON.stringify(out);
     expect(json).not.toMatch(/\{\}/);
   });

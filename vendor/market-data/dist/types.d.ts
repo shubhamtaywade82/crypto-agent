@@ -13,7 +13,7 @@ export type IntervalMap = Readonly<Record<Timeframe, string>>;
  * Options for fetching historical klines.
  */
 export interface FetchKlinesOptions {
-    /** Trading pair, exchange-native format (e.g. "BTCUSDT" on Binance). */
+    /** Trading pair, exchange-native format (e.g. "ETHUSDT" on Binance). */
     readonly symbol: string;
     /** Canonical timeframe. */
     readonly timeframe: Timeframe;

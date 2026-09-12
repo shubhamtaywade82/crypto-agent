@@ -1,19 +1,17 @@
 import type { Candle } from '@nemesis-oss/market-events';
 import type { ExchangeAdapter, ExchangeId, FetchKlinesOptions, FundingRateSnapshot, LiveKlineSubscription, MarkPriceSnapshot, OpenInterestSnapshot, StreamSubscription } from '../types.js';
-import type { BinanceAdapterConfig } from './rest.js';
+import type { BinanceAdapterConfig, BinanceKlineMarket } from './rest.js';
 import { type BinanceWsConfig } from './ws.js';
 /**
- * Binance adapter: implements the full {@link ExchangeAdapter} surface
- * using spot REST for klines and USDⓈ-M futures REST for funding/OI/mark.
- *
- * Live klines come from the futures WebSocket stream, which sends a
- * kline message on every update but only closed klines are forwarded to
- * the consumer.
+ * Binance adapter: implements the full {@link ExchangeAdapter} surface.
+ * Default historical klines are **spot**; live closed candles use USDⓈ-M futures WS.
+ * For perp backtests aligned with WS, use {@link createBinanceFuturesAdapter}.
  */
 export declare class BinanceAdapter implements ExchangeAdapter {
     readonly exchange: ExchangeId;
     readonly restBaseUrl: string;
     readonly wsBaseUrl: string;
+    readonly klineMarket: BinanceKlineMarket;
     private readonly rest;
     private readonly wsConfig;
     constructor(config?: BinanceAdapterConfig & BinanceWsConfig);
@@ -25,4 +23,6 @@ export declare class BinanceAdapter implements ExchangeAdapter {
 }
 /** Factory: create a Binance adapter with sensible defaults. */
 export declare function createBinanceAdapter(config?: BinanceAdapterConfig & BinanceWsConfig): BinanceAdapter;
+/** USDⓈ-M futures REST klines + futures WS + funding/OI/mark (perp research default). */
+export declare function createBinanceFuturesAdapter(config?: BinanceAdapterConfig & BinanceWsConfig): BinanceAdapter;
 //# sourceMappingURL=adapter.d.ts.map

@@ -103,5 +103,9 @@ export const sendCouncilTelegram = async (
   evidence?: string
 ): Promise<boolean> => {
   const urgent = ['EXECUTED', 'APPROVED', 'EXIT_SIGNALLED', 'REJECTED'].includes(trace.status);
-  return sendTelegramHtml(formatCouncilTelegram(trigger, trace, analysis, evidence), !urgent);
+  const tradeSignal = ['EXECUTED', 'APPROVED', 'EXIT_SIGNALLED'].includes(trace.status);
+  return sendTelegramHtml(formatCouncilTelegram(trigger, trace, analysis, evidence), {
+    channel: tradeSignal ? 'trading' : 'alert',
+    silent: !urgent,
+  });
 };

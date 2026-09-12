@@ -39,7 +39,7 @@ import { createBinanceAdapter } from '@nemesis-oss/market-data';
 
 const binance = createBinanceAdapter();
 const candles = await binance.fetchKlines({
-  symbol: 'BTCUSDT',
+  symbol: 'ETHUSDT',
   timeframe: '15m',
   startTime: Date.now() - 24 * 60 * 60 * 1000,  // 24h ago
   endTime: Date.now(),
@@ -56,7 +56,7 @@ import { createBinanceAdapter } from '@nemesis-oss/market-data';
 
 const binance = createBinanceAdapter();
 const stream = await binance.subscribeKlines({
-  symbol: 'BTCUSDT',
+  symbol: 'ETHUSDT',
   timeframe: '15m',
   onCandle: (candle) => {
     // Fires once per CLOSED candle — never for the in-progress candle.
@@ -74,9 +74,9 @@ await stream.unsubscribe();
 ### Funding, open interest, mark price
 
 ```typescript
-const funding = await binance.fetchFundingRate('BTCUSDT');
-const oi = await binance.fetchOpenInterest('BTCUSDT');
-const mark = await binance.fetchMarkPrice('BTCUSDT');
+const funding = await binance.fetchFundingRate('ETHUSDT');
+const oi = await binance.fetchOpenInterest('ETHUSDT');
+const mark = await binance.fetchMarkPrice('ETHUSDT');
 ```
 
 ### Direct to research agent
@@ -87,7 +87,7 @@ import { createResearchAgentFromExchange } from '@nemesis-oss/market-research-ag
 
 const agent = await createResearchAgentFromExchange({
   adapter: createBinanceAdapter(),
-  symbol: 'BTCUSDT',
+  symbol: 'ETHUSDT',
   timeframe: '15m',
   startTime: Date.now() - 30 * 24 * 60 * 60 * 1000,
   endTime: Date.now(),
@@ -95,7 +95,7 @@ const agent = await createResearchAgentFromExchange({
 });
 
 const result = await agent.research(
-  'Does bullish FVG continuation on BTCUSDT 15m provide statistically significant 2R edge?',
+  'Does bullish FVG continuation on ETHUSDT 15m provide statistically significant 2R edge?',
 );
 ```
 

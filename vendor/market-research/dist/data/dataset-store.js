@@ -4,9 +4,11 @@ import { Decimal } from 'decimal.js';
 /**
  * Saves immutable normalized candles and metadata to a JSON file.
  */
-export async function saveDataset(storageDir, symbol, timeframe, candles) {
+export async function saveDataset(storageDir, symbol, timeframe, candles, cacheLabel) {
     await fs.mkdir(storageDir, { recursive: true });
-    const filename = `${symbol.toUpperCase()}-${timeframe}.json`;
+    const filename = cacheLabel
+        ? `${symbol.toUpperCase()}-${timeframe}-${cacheLabel}.json`
+        : `${symbol.toUpperCase()}-${timeframe}.json`;
     const filePath = path.join(storageDir, filename);
     const payload = {
         metadata: {

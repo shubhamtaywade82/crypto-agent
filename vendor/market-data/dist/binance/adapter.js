@@ -1,26 +1,29 @@
 import { BINANCE_REST_FUTURES, BINANCE_REST_SPOT, BINANCE_WS_FUTURES, BinanceRestAdapter, } from './rest.js';
 import { subscribeBinanceKlines } from './ws.js';
 /**
- * Binance adapter: implements the full {@link ExchangeAdapter} surface
- * using spot REST for klines and USDⓈ-M futures REST for funding/OI/mark.
- *
- * Live klines come from the futures WebSocket stream, which sends a
- * kline message on every update but only closed klines are forwarded to
- * the consumer.
+ * Binance adapter: implements the full {@link ExchangeAdapter} surface.
+ * Default historical klines are **spot**; live closed candles use USDⓈ-M futures WS.
+ * For perp backtests aligned with WS, use {@link createBinanceFuturesAdapter}.
  */
 export class BinanceAdapter {
     exchange = 'binance';
     restBaseUrl;
     wsBaseUrl;
+    klineMarket;
     rest;
     wsConfig;
     constructor(config = {}) {
+        const klineMarket = config.klineMarket ?? 'spot';
+        this.klineMarket = klineMarket;
         const spotRest = config.spotRestBaseUrl ?? BINANCE_REST_SPOT;
-        this.restBaseUrl = spotRest;
+        this.restBaseUrl = klineMarket === 'usdm_futures'
+            ? (config.futuresRestBaseUrl ?? BINANCE_REST_FUTURES)
+            : spotRest;
         this.wsBaseUrl = config.wsBaseUrl ?? BINANCE_WS_FUTURES;
         this.rest = new BinanceRestAdapter({
             spotRestBaseUrl: spotRest,
             futuresRestBaseUrl: config.futuresRestBaseUrl ?? BINANCE_REST_FUTURES,
+            klineMarket,
             requestTimeoutMs: config.requestTimeoutMs,
             maxRetries: config.maxRetries,
             retryBackoffMs: config.retryBackoffMs,
@@ -52,5 +55,9 @@ export class BinanceAdapter {
 /** Factory: create a Binance adapter with sensible defaults. */
 export function createBinanceAdapter(config) {
     return new BinanceAdapter(config);
+}
+/** USDⓈ-M futures REST klines + futures WS + funding/OI/mark (perp research default). */
+export function createBinanceFuturesAdapter(config) {
+    return new BinanceAdapter({ ...config, klineMarket: 'usdm_futures' });
 }
 //# sourceMappingURL=adapter.js.map

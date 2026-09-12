@@ -31,23 +31,22 @@ export const BINANCE_WS_FUTURES = 'wss://fstream.binance.com';
  * Binance REST adapter. Implements the historical klines, funding, OI, and
  * mark-price surface for both spot and USDⓈ-M futures.
  *
- * Klines are fetched from the spot endpoint by default; if `futuresRestBaseUrl`
- * is used as the kline source, set `useFuturesKlines: true` (not exposed
- * here — callers who need futures klines should construct the adapter with
- * `spotRestBaseUrl` pointed at the futures base URL).
- *
- * Rate-limit handling: pagination with batchLimit ≤ 1000 (spot) / 1500
- * (futures). HTTP 429 triggers backoff honoring `Retry-After`.
+ * Klines default to the spot endpoint. Set `klineMarket: 'usdm_futures'` for
+ * USDⓈ-M perp history (`/fapi/v1/klines` on {@link BINANCE_REST_FUTURES}).
+ * Rate-limit handling: pagination with batchLimit ≤ 1000 (spot) / 1500 (futures).
+ * HTTP 429 triggers backoff honoring `Retry-After`.
  */
 export class BinanceRestAdapter {
     spotRest;
     futuresRest;
+    klineMarket;
     timeoutMs;
     maxRetries;
     retryBackoffMs;
     constructor(config = {}) {
         this.spotRest = config.spotRestBaseUrl ?? BINANCE_REST_SPOT;
         this.futuresRest = config.futuresRestBaseUrl ?? BINANCE_REST_FUTURES;
+        this.klineMarket = config.klineMarket ?? 'spot';
         this.timeoutMs = config.requestTimeoutMs ?? 15_000;
         this.maxRetries = config.maxRetries ?? 3;
         this.retryBackoffMs = config.retryBackoffMs ?? 500;
@@ -58,12 +57,16 @@ export class BinanceRestAdapter {
      */
     async fetchKlines(options) {
         const interval = BINANCE_INTERVAL_MAP[options.timeframe];
-        const batchLimit = Math.min(options.batchLimit ?? 1000, 1000);
+        const useFutures = this.klineMarket === 'usdm_futures';
+        const maxBatch = useFutures ? 1500 : 1000;
+        const batchLimit = Math.min(options.batchLimit ?? maxBatch, maxBatch);
+        const restBase = useFutures ? this.futuresRest : this.spotRest;
+        const klinePath = useFutures ? '/fapi/v1/klines' : '/api/v3/klines';
         const all = [];
         const seen = new Set();
         let currentStart = options.startTime;
         while (currentStart < options.endTime) {
-            const url = new URL(`${this.spotRest}/api/v3/klines`);
+            const url = new URL(`${restBase}${klinePath}`);
             url.searchParams.set('symbol', options.symbol);
             url.searchParams.set('interval', interval);
             url.searchParams.set('startTime', String(currentStart));

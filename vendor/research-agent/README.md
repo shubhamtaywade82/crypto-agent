@@ -89,6 +89,31 @@ console.log(result.status); // 'ACHIEVED' | 'PARTIAL' | 'CEDED' | 'FAILED'
 console.log(result.dataset); // { symbol, timeframe, candleCount }
 ```
 
+## CLI — question → Ollama → sealed report
+
+From the monorepo root (requires a running Ollama server and a tool-capable model, default `openbmb/minicpm5-2b`):
+
+```bash
+# Preflight
+pnpm run research -- --check-ollama
+
+# Live Binance history
+pnpm run research -- --symbol BTCUSDT --timeframe 15m --days 14 \
+  --question "Does FVG show significant +2R uplift after FDR?"
+
+# Cached dataset from live-study
+pnpm run research -- --dataset packages/market-research/.datasets/BTCUSDT-15m.json
+
+# Optional HTF context for negative-evidence tools
+pnpm run research -- --symbol ETHUSDT --htf 1h,4h --model agent-core:latest
+```
+
+Integration test (local Ollama required):
+
+```bash
+OLLAMA_INTEGRATION=1 pnpm --filter @nemesis-oss/market-research-agent test test/ollama.integration.test.ts
+```
+
 The agent never sees the candles directly — they live in the
 `ResearchContext`. The model only sees the projected outputs of tool
 calls. This is the architectural firewall between the LLM and the data.
@@ -119,7 +144,7 @@ All tools are `resourceClass: "local-cpu"`, `effects: "pure"`,
 | Tool | Description |
 | --- | --- |
 | `list_event_detectors` | List the available deterministic detectors |
-| `detect_events` | Run a detector (fvg, bos, choch, mss, order_block, liquidity_sweep, displacement) and return events with full provenance |
+| `detect_events` | Run a detector (fvg, bos, choch, mss, order_block, liquidity_sweep, displacement, vsa) and return events with full provenance |
 | `get_market_context` | Compute regime/ATR/session/HTF snapshot at a candle index |
 | `run_study` | Universal empirical study with matched controls, CIs, and Benjamini-Hochberg FDR |
 | `run_event_study` | Single-event-type empirical study |
@@ -140,7 +165,7 @@ When you want the deterministic numbers without spinning up Ollama — for
 a CLI, a backtest harness, or a unit test — call tools directly:
 
 ```ts
-const agent = createResearchAgent({ symbol: 'BTCUSDT', timeframe: '15m', candles });
+const agent = createResearchAgent({ symbol: 'ETHUSDT', timeframe: '15m', candles });
 
 const summary = await agent.invokeTool('dataset_summary', {});
 const fvgEvents = await agent.invokeTool('detect_events', { eventType: 'fvg' });
@@ -197,7 +222,7 @@ as a third pnpm workspace package. The integration path:
    }));
 
    const agent = createResearchAgent({
-     symbol: 'BTCUSDT',
+     symbol: 'ETHUSDT',
      timeframe: '15m',
      candles,
      htfCandles: { '1h': htfCandles1h, '4h': htfCandles4h },

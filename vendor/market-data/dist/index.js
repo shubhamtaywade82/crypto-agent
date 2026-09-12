@@ -2,7 +2,7 @@ export * from './types.js';
 export * from './http.js';
 export { BINANCE_INTERVAL_MAP, BINANCE_REST_FUTURES, BINANCE_REST_SPOT, BINANCE_WS_FUTURES, BinanceRestAdapter, } from './binance/rest.js';
 export { BinanceKlineStream, subscribeBinanceKlines } from './binance/ws.js';
-export { BinanceAdapter, createBinanceAdapter } from './binance/adapter.js';
+export { BinanceAdapter, createBinanceAdapter, createBinanceFuturesAdapter } from './binance/adapter.js';
 export { BYBIT_INTERVAL_MAP, BYBIT_REST_V5, BYBIT_WS_PUBLIC, BybitRestAdapter, createBybitRestAdapter, } from './bybit/rest.js';
 import { createBinanceAdapter } from './binance/adapter.js';
 import { createBybitRestAdapter, BYBIT_WS_PUBLIC } from './bybit/rest.js';
@@ -15,7 +15,7 @@ import { createBybitRestAdapter, BYBIT_WS_PUBLIC } from './bybit/rest.js';
  *
  * const binance = createExchangeAdapter('binance');
  * const candles = await binance.fetchKlines({
- *   symbol: 'BTCUSDT',
+ *   symbol: 'ETHUSDT',
  *   timeframe: '15m',
  *   startTime: Date.now() - 24 * 60 * 60 * 1000,
  *   endTime: Date.now(),

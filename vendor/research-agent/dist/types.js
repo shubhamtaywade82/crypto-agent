@@ -17,5 +17,6 @@ export const DETECTABLE_EVENT_TYPES = [
     'order_block',
     'liquidity_sweep',
     'displacement',
+    'vsa',
 ];
 //# sourceMappingURL=types.js.map
