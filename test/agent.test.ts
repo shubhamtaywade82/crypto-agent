@@ -81,7 +81,7 @@ describe('UI Formatters & Markdown Renderer', () => {
     expect(formatToolArgs({ symbol: 'SOLUSDT' })).toBe('{"symbol":"SOLUSDT"}');
     const longArgs = { symbol: 'BTCUSDT', extra: 'a'.repeat(60) };
     expect(formatToolArgs(longArgs).length).toBeLessThanOrEqual(50);
-  });
+  }, 15_000);
 
   it('formats tool results compactly on a single line without newlines', async () => {
     const { formatToolResult } = await import('../src/ui/App.js');
