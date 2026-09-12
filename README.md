@@ -102,6 +102,43 @@ Docs: `AGENTS.md` (developer & AI agent guide) · `docs/DEPLOYMENT.md` (server &
 
 ---
 
+## 📊 Market Intelligence Layer (vendored)
+
+This repo vendors the full [`market-intelligence`](https://github.com/shubhamtaywade82/market-intelligence) platform under `vendor/`. These packages provide the empirical evidence layer that powers the kernel's market-state, event-scan, and evidence-gate engines.
+
+### Vendored packages
+
+| Package | Path | Purpose |
+| :--- | :--- | :--- |
+| `@nemesis-oss/market-events` | `vendor/market-events` | Deterministic event detection (FVG, BOS, CHoCH, MSS, OB, sweeps, VSA, Wyckoff) |
+| `@nemesis-oss/market-research` | `vendor/market-research` | Empirical validation: matched controls, cluster bootstrap, FDR, walk-forward |
+| `@nemesis-oss/market-research-agent` | `vendor/research-agent` | LLM-driven agentic research interface (uses `@nemesis-oss/agentic-runtime`) |
+| `@nemesis-oss/market-data` | `vendor/market-data` | Binance/Bybit REST+WS adapters, canonical Candle normalization |
+| `@nemesis-oss/market-stream` | `vendor/market-stream` | Live MarketState from WebSocket feeds, multi-stream orchestration |
+| `@nemesis-oss/market-state` | `vendor/market-state` | Aggregated cross-symbol view, market breadth, hot symbols |
+| `@nemesis-oss/regime-engine` | `vendor/regime-engine` | Composite regime: trend/volatility/liquidity/momentum/derivatives |
+| `@nemesis-oss/market-features` | `vendor/market-features` | Deterministic features: returns, ATR, CVD, microstructure |
+| `@nemesis-oss/event-graph` | `vendor/event-graph` | Multi-event interaction graph, composite pattern discovery |
+| `@nemesis-oss/hypothesis-engine` | `vendor/hypothesis-engine` | LLM proposes → engine tests → WFO → OOS → verdict |
+| `@nemesis-oss/strategy-discovery` | `vendor/strategy-discovery` | Candidate generation across events × regimes |
+| `@nemesis-oss/strategy-registry` | `vendor/strategy-registry` | Lifecycle: DISCOVERED → … → RETIRED |
+| `@nemesis-oss/research-memory` | `vendor/research-memory` | Persistent domain memory, hypothesis deduplication |
+| `@nemesis-oss/negative-evidence-system` | `vendor/negative-evidence-system` | Positive vs negative evidence balance per strategy |
+| `@nemesis-oss/market-intelligence-api` | `vendor/market-intelligence-api` | HTTP API: /markets /state /events /strategies /research |
+
+### Updating vendored packages
+
+```bash
+# After upstream changes in market-intelligence repo:
+cp -r ../market-intelligence/packages/<package> vendor/<package>
+# Fix workspace:* → file:../ refs in vendor/<package>/package.json
+pnpm install
+```
+
+See the [market-intelligence ROADMAP](https://github.com/shubhamtaywade82/market-intelligence/blob/main/ROADMAP.md) for the full platform architecture.
+
+---
+
 ## ✨ Features
 
 - **ReAct Decision Loop:** Native tool calling with reasoning traces powered by Gemma 4.
