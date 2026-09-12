@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { Spinner } from '../../components/ui/spinner/index.js';
 import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
 import { fmtPrice } from '../KernelDashboard.js';
 import { liveQuote, useLiveTick } from './LiveLtpTable.js';
@@ -55,9 +56,13 @@ const MonitoredMarketsTable = (p: {
       {p.markets.map((m, idx) => (
         <MarketRow key={m.symbol} m={m} idx={idx} isSel={idx === safeIdx} compact={p.compact} />
       ))}
-      <Text color="gray" italic>
-        {p.isScanning ? '⠋ Scanning markets...' : `Scanned at ${p.markets[0]?.scannedAt ?? 'recently'} │ Watching for structural triggers`}
-      </Text>
+      {p.isScanning ? (
+        <Spinner label="Scanning markets..." type="dots" />
+      ) : (
+        <Text color="gray" italic>
+          {`Scanned at ${p.markets[0]?.scannedAt ?? 'recently'} │ Watching for structural triggers`}
+        </Text>
+      )}
     </Box>
   );
 };
@@ -68,7 +73,7 @@ export const OpportunityTable = (p: OpportunityTableProps): React.JSX.Element =>
       return <MonitoredMarketsTable markets={p.markets} selectedIndex={p.selectedIndex} compact={p.compact} isScanning={p.isScanning} />;
     }
     if (p.isScanning) {
-      return <Text color="yellow">⠋ Initial market scan in progress... analyzing order book & MTF structure</Text>;
+      return <Spinner label="Initial market scan in progress... analyzing order book & MTF structure" type="dots" />;
     }
     return <Text color="gray" italic>Initializing market scan... run /scan or wait for auto-scan</Text>;
   }

@@ -1,11 +1,23 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { WORKSPACE_TABS, type WorkspaceTab } from '../types.js';
+import { KeyHint, type KeyHintItem } from '../../components/ui/key-hint/index.js';
+import { Badge } from '../../components/ui/badge/index.js';
 
 export interface ConsoleFooterProps {
   readonly activeTab: WorkspaceTab;
   readonly commandMode?: boolean;
 }
+
+const FOOTER_KEYS: readonly KeyHintItem[] = [
+  { key: '1-0', label: 'Tabs' },
+  { key: '↑/↓', label: 'History' },
+  { key: 'PgUp/Dn', label: 'Scroll' },
+  { key: 'Enter', label: 'Send' },
+  { key: '/help', label: 'Help' },
+  { key: 'Ctrl+P', label: 'Pause' },
+  { key: 'Ctrl+C', label: 'Quit' },
+];
 
 export const TabsBar = ({ activeTab }: { readonly activeTab: WorkspaceTab }): React.JSX.Element => (
   <Box gap={1} paddingX={1}>
@@ -22,11 +34,10 @@ export const TabsBar = ({ activeTab }: { readonly activeTab: WorkspaceTab }): Re
 
 export const ConsoleFooter = ({ commandMode }: ConsoleFooterProps): React.JSX.Element => (
   <Box flexDirection="column" marginTop={0}>
-    <Box paddingX={1} justifyContent="space-between">
-      <Text color="gray">
-        <Text color="cyan">1-0</Text> Tabs │ <Text color="cyan">↑/↓</Text> History │ <Text color="cyan">PgUp/Dn</Text> Scroll │ <Text color="cyan">Enter</Text> Send │ <Text color="cyan">/help</Text> │ <Text color="cyan">Ctrl+P</Text> Pause │ <Text color="cyan">Ctrl+C</Text> Quit
-      </Text>
-      {commandMode ? <Text bold color="yellow">COMMAND MODE</Text> : <Text color="gray" italic>Not financial advice.</Text>}
+    <Box paddingX={1} justifyContent="space-between" alignItems="center">
+      <KeyHint keys={[...FOOTER_KEYS]} />
+      {commandMode ? <Badge variant="warning">COMMAND MODE</Badge> : <Text color="gray" italic>Not financial advice.</Text>}
     </Box>
   </Box>
 );
+

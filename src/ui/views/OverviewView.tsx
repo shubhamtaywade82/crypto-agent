@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
+import { StatusIndicator } from '../../components/ui/status-indicator/index.js';
+import { Badge } from '../../components/ui/badge/index.js';
 import { getKernel } from '../../kernel.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
@@ -31,7 +34,6 @@ export interface OverviewViewProps {
   readonly port?: ReturnType<typeof usePortfolio>;
 }
 
-const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 6));
 
 const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => {
   const snap = getKernel().marketStore.snapshot(symbol);
@@ -70,8 +72,21 @@ const MarketWatchPanel = ({ focusSymbol }: { readonly focusSymbol: string }): Re
   );
 };
 
-const StatusDot = ({ ok, label }: { readonly ok: boolean; readonly label: string }): React.JSX.Element => (
-  <Text color="gray">● {label}: <Text color={ok ? 'green' : 'red'}>{ok ? 'OK' : 'STALE'}</Text></Text>
+const SidebarSystemStatus = ({ streamLive, halted, circuit }: {
+  readonly streamLive: boolean;
+  readonly halted: boolean;
+  readonly circuit: string;
+}): React.JSX.Element => (
+  <Box flexDirection="column" gap={0}>
+    <Text bold color="yellow">SYSTEM STATUS</Text>
+    <StatusIndicator status="online" label="Agent Runtime" />
+    <StatusIndicator status={streamLive ? 'online' : 'error'} label="Binance MD WS" />
+    <StatusIndicator status={!halted ? 'online' : 'error'} label="Execution" />
+    <Box gap={1} marginTop={0}>
+      <Text color="gray">Circuit:</Text>
+      <Badge variant={halted ? 'error' : circuit === 'NORMAL' ? 'success' : 'warning'}>{circuit}</Badge>
+    </Box>
+  </Box>
 );
 
 const SidebarPositions = ({ positions }: { readonly positions: readonly BrokerPosition[] }): React.JSX.Element => (
@@ -87,20 +102,6 @@ const SidebarPositions = ({ positions }: { readonly positions: readonly BrokerPo
         </Text>
       );
     })}
-  </Box>
-);
-
-const SidebarSystemStatus = ({ streamLive, halted, circuit }: {
-  readonly streamLive: boolean;
-  readonly halted: boolean;
-  readonly circuit: string;
-}): React.JSX.Element => (
-  <Box flexDirection="column">
-    <Text bold color="yellow">SYSTEM STATUS</Text>
-    <StatusDot ok={true} label="Agent Runtime" />
-    <StatusDot ok={streamLive} label="Binance MD WS" />
-    <StatusDot ok={!halted} label="Execution" />
-    <Text color="gray">● Circuit: <Text color="white">{circuit}</Text></Text>
   </Box>
 );
 
@@ -141,7 +142,7 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
   return (
     <Box flexDirection="column" gap={0} paddingX={1}>
       <TraderBriefPanel brief={brief} />
-      <Text color="gray">{rule()}</Text>
+      <Divider style="single" />
       <Box flexDirection="row" gap={1}>
         <Box flexDirection="column" flexGrow={1} minWidth={40}>
           <AgentConsoleFeed
@@ -160,7 +161,7 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
           port={p.port}
         />
       </Box>
-      <Text color="gray">{rule()}</Text>
+      <Divider style="single" />
       <MarketWatchPanel focusSymbol={p.focusSymbol} />
     </Box>
   );

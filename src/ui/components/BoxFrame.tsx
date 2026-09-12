@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Panel } from '../../components/ui/panel/index.js';
 
 export interface BoxFrameProps {
   readonly title: string;
@@ -13,24 +13,20 @@ export interface BoxFrameProps {
 }
 
 export const BoxFrame = ({
-  title, badge, badgeColor = 'cyan', children, width,
-  borderColor = 'gray', paddingX = 1, paddingY = 0,
+  title, badge, children, width,
+  borderColor, paddingX = 1,
 }: BoxFrameProps): React.JSX.Element => {
-  const termWidth = width ?? Math.max(40, (process.stdout.columns || 80) - 4);
-  const badgeText = badge ? `[${badge}] ` : '';
-  const remaining = Math.max(2, termWidth - (`┌─ ${title} `.length + badgeText.length + 1));
-
+  const panelTitle = badge ? `${title} [${badge}]` : title;
   return (
-    <Box flexDirection="column" marginY={0}>
-      <Box>
-        <Text color={borderColor}>┌─ </Text>
-        <Text bold color="white">{title} </Text>
-        {badge ? <Text color={badgeColor}>[{badge}] </Text> : null}
-        <Text color={borderColor}>{'─'.repeat(remaining) + '┐'}</Text>
-      </Box>
-      <Box flexDirection="column" borderStyle="single" borderTop={false} borderColor={borderColor} paddingX={paddingX} paddingY={paddingY}>
-        {children}
-      </Box>
-    </Box>
+    <Panel
+      title={panelTitle}
+      borderStyle="single"
+      borderColor={borderColor}
+      padding={paddingX}
+      width={width ?? 'auto'}
+    >
+      {children}
+    </Panel>
   );
 };
+

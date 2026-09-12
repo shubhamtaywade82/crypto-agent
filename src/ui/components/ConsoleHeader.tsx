@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
+import { Divider } from '../../components/ui/divider/index.js';
 import type { CircuitState } from '../../domain/risk/risk-config.js';
 
 export interface ConsoleHeaderProps {
@@ -47,7 +48,6 @@ const circuitLabel = (c: CircuitState, halted: boolean): string => {
   return c;
 };
 
-const rule = (): string => '─'.repeat(Math.max(20, (process.stdout.columns || 80) - 2));
 
 const HeaderMetrics = ({ p, pnlSign, pnlColor, time }: {
   readonly p: ConsoleHeaderProps; readonly pnlSign: string; readonly pnlColor: string; readonly time: string;
@@ -101,7 +101,7 @@ export const ConsoleHeader = (p: ConsoleHeaderProps): React.JSX.Element => {
       <HeaderTitleRow date={date} uptime={uptime} liveLabel={liveLabel} venueColor={venueColor} />
       <Text wrap="truncate" color="gray">Autonomous AI + Deterministic Crypto Futures Trading</Text>
       <HeaderStatusRow {...p} risk={risk} pnlSign={pnlSign} pnlColor={pnlColor} time={time} venueColor={venueColor} />
-      <Text color="gray">{rule()}</Text>
+      <Divider style="single" />
     </Box>
   );
 };
