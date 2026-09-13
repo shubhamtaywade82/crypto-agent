@@ -154,6 +154,8 @@ describe('TextInput and ConsoleInput UI', () => {
     const i2 = render(React.createElement(ConsoleInput, { value: '/help', busy: false, onChange: () => {}, onSubmit: () => {} }), { stdout: stream2 as unknown as NodeJS.WriteStream });
     i2.unmount();
     expect(out2).toContain('/help');
+    const promptMarks = out2.replace(/\x1b\[[0-9;]*m/g, '').split('❯').length - 1;
+    expect(promptMarks).toBe(1);
   });
 
   it('renders password masking and label properly', async () => {

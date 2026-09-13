@@ -44,21 +44,17 @@ export const ConsoleInput = (p: ConsoleInputProps): React.JSX.Element => {
       {p.busy ? (
         <BusyLine statusText={p.statusText} />
       ) : (
-        <Box alignItems="center">
-          <Text color="cyan" bold>❯ </Text>
-          <TextInput
-            value={p.value}
-            onChange={p.onChange}
-            onSubmit={p.onSubmit}
-            placeholder={PLACEHOLDER}
-            focus={isFocused}
-            onUpArrow={p.onHistoryUp}
-            onDownArrow={p.onHistoryDown}
-            onEscape={() => handleInputEscape(p)}
-          />
-        </Box>
+        <TextInput
+          value={p.value}
+          onChange={p.onChange}
+          onSubmit={p.onSubmit}
+          placeholder={PLACEHOLDER}
+          focus={isFocused}
+          onUpArrow={p.onHistoryUp}
+          onDownArrow={p.onHistoryDown}
+          onEscape={() => handleInputEscape(p)}
+        />
       )}
     </Box>
   );
 };
-

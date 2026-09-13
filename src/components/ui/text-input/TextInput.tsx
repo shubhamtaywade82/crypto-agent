@@ -189,7 +189,7 @@ export const TextInput: React.FC<TextInputProps> = ({
   return (
     <Box>
       {label ? <Text color={theme.colors.muted}>{label} </Text> : null}
-      <Text color={theme.colors.border}>{'❯ '}</Text>
+      <Text color={theme.colors.primary} bold>{'❯ '}</Text>
       {renderInputContent({ display, cursorPos: cursor, isFocused: focus, placeholder, theme })}
     </Box>
   );
