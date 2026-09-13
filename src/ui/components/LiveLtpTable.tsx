@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from 'ink';
+import { Table, type TableColumn } from '../../components/ui/table/index.js';
 import { getKernel } from '../../kernel.js';
 import { fmtPrice } from '../KernelDashboard.js';
 import { kernelWatchSymbols } from '../../kernel-streams.js';
@@ -39,10 +40,7 @@ export const useLiveTick = (): number => {
   return tick;
 };
 
-export const liveQuote = (symbol: string): {
-  readonly ltp?: number; readonly bid?: number; readonly ask?: number;
-  readonly mark?: number; readonly live: boolean;
-} => {
+export const liveQuote = (symbol: string): LtpQuote => {
   const kernel = getKernel();
   const snap = kernel.marketStore.snapshot(symbol);
   if (!snap) return { live: false };
@@ -53,28 +51,45 @@ export const liveQuote = (symbol: string): {
   return { ltp, bid, ask, mark: snap.mark, live: !stale && ltp !== undefined };
 };
 
-const pad = (v: string, n: number): string => v.padEnd(n);
-
-interface LtpRowProps {
-  readonly sym: string;
-  readonly isAnchor: boolean;
-}
-
-const LtpRow = ({ sym, isAnchor }: LtpRowProps): React.JSX.Element => {
-  const q = liveQuote(sym);
-  const status = isAnchor ? '● ANCHOR' : q.live ? '● LIVE' : q.ltp !== undefined ? '○ STALE' : '… WAIT';
-  const statusColor = isAnchor ? 'cyan' : q.live ? 'green' : q.ltp !== undefined ? 'yellow' : 'gray';
-  return (
-    <Text key={sym} wrap="truncate">
-      <Text bold color={isAnchor ? 'yellow' : undefined}>{pad(sym, 10)}</Text>
-      <Text color="white">{pad(q.ltp !== undefined ? fmtPrice(q.ltp) : '—', 14)}</Text>
-      <Text color="green">{pad(q.bid !== undefined ? fmtPrice(q.bid) : '—', 14)}</Text>
-      <Text color="red">{pad(q.ask !== undefined ? fmtPrice(q.ask) : '—', 14)}</Text>
-      <Text color="gray">{pad(q.mark !== undefined ? fmtPrice(q.mark) : '—', 14)}</Text>
-      <Text color={statusColor}>{status}</Text>
-    </Text>
-  );
+export type LtpQuote = {
+  readonly ltp?: number;
+  readonly bid?: number;
+  readonly ask?: number;
+  readonly mark?: number;
+  readonly live: boolean;
 };
+
+export type LtpTableRow = {
+  symbol: string;
+  ltp: string;
+  bid: string;
+  ask: string;
+  mark: string;
+  status: string;
+};
+
+const moneyCell = (n?: number): string => (n !== undefined ? `$${fmtPrice(n)}` : '—');
+
+export const toLtpTableRow = (symbol: string, quote: LtpQuote, isAnchor: boolean): LtpTableRow => {
+  const status = isAnchor ? 'ANCHOR' : quote.live ? 'LIVE' : quote.ltp !== undefined ? 'STALE' : 'WAIT';
+  return {
+    symbol,
+    ltp: moneyCell(quote.ltp),
+    bid: moneyCell(quote.bid),
+    ask: moneyCell(quote.ask),
+    mark: moneyCell(quote.mark),
+    status,
+  };
+};
+
+const LTP_COLUMNS: TableColumn<LtpTableRow>[] = [
+  { key: 'symbol', header: 'SYMBOL' },
+  { key: 'ltp', header: 'LTP', align: 'right' },
+  { key: 'bid', header: 'BID', align: 'right' },
+  { key: 'ask', header: 'ASK', align: 'right' },
+  { key: 'mark', header: 'MARK', align: 'right' },
+  { key: 'status', header: 'STATUS' },
+];
 
 export const LiveLtpTable = (): React.JSX.Element => {
   useLiveTick();
@@ -82,6 +97,9 @@ export const LiveLtpTable = (): React.JSX.Element => {
   const traded = useMemo(() => new Set(
     (process.env.KERNEL_SYMBOLS ?? 'SOLUSDT,ETHUSDT,XRPUSDT').split(',').map((s) => s.trim().toUpperCase())
   ), []);
+  const data = symbols.map((sym) =>
+    toLtpTableRow(sym, liveQuote(sym), sym === 'BTCUSDT' && !traded.has('BTCUSDT'))
+  );
 
   return (
     <Box flexDirection="column">
@@ -89,12 +107,7 @@ export const LiveLtpTable = (): React.JSX.Element => {
         <Text bold color="cyan">LIVE LTP — ALL SYMBOLS</Text>
         <Text color="gray">WS miniTicker + bookTicker</Text>
       </Box>
-      <Text color="gray">
-        {pad('SYMBOL', 10)}{pad('LTP', 14)}{pad('BID', 14)}{pad('ASK', 14)}{pad('MARK', 14)}STATUS
-      </Text>
-      {symbols.map((sym) => (
-        <LtpRow key={sym} sym={sym} isAnchor={sym === 'BTCUSDT' && !traded.has('BTCUSDT')} />
-      ))}
+      <Table data={data} columns={LTP_COLUMNS} />
     </Box>
   );
 };

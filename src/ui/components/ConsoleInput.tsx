@@ -24,21 +24,28 @@ const handleInputEscape = (p: ConsoleInputProps): void => {
   p.onEscape?.();
 };
 
+const BusyLine = (p: { readonly statusText?: string }): React.JSX.Element => (
+  <Box flexDirection="column">
+    <Box alignItems="center">
+      <Box marginRight={1}><Spinner type="dots" /></Box>
+      <Text color="gray" italic>Agent is working...</Text>
+    </Box>
+    {p.statusText ? (
+      <Text color="yellow" italic wrap="truncate">{'  ↳ '}{p.statusText}</Text>
+    ) : null}
+  </Box>
+);
+
 export const ConsoleInput = (p: ConsoleInputProps): React.JSX.Element => {
   const isFocused = !p.busy && (p.focused ?? true);
-
   return (
     <Box flexDirection="column" marginTop={0}>
       <Divider style="single" />
-      <Box alignItems="center">
-        {p.busy ? (
-          <Box alignItems="center">
-            <Box marginRight={1}>
-              <Spinner type="dots" />
-            </Box>
-            <Text color="gray" italic>Agent is working...</Text>
-          </Box>
-        ) : (
+      {p.busy ? (
+        <BusyLine statusText={p.statusText} />
+      ) : (
+        <Box alignItems="center">
+          <Text color="cyan" bold>❯ </Text>
           <TextInput
             value={p.value}
             onChange={p.onChange}
@@ -49,13 +56,8 @@ export const ConsoleInput = (p: ConsoleInputProps): React.JSX.Element => {
             onDownArrow={p.onHistoryDown}
             onEscape={() => handleInputEscape(p)}
           />
-        )}
-      </Box>
-      {p.busy && p.statusText ? (
-        <Text color="yellow" italic wrap="truncate">
-          {'  ↳ '}{p.statusText}
-        </Text>
-      ) : null}
+        </Box>
+      )}
     </Box>
   );
 };

@@ -1,15 +1,10 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Spinner } from '../../components/ui/spinner/index.js';
+import { Table, type TableColumn } from '../../components/ui/table/index.js';
 import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
 import { fmtPrice } from '../KernelDashboard.js';
-import { liveQuote, useLiveTick } from './LiveLtpTable.js';
-
-const stateColor = (state: string): string => {
-  if (state === 'REJECTED' || state === 'HALTED') return 'red';
-  if (state === 'READY' || state === 'EXECUTED') return 'green';
-  return 'yellow';
-};
+import { liveQuote, useLiveTick, type LtpQuote } from './LiveLtpTable.js';
 
 export interface OpportunityTableProps {
   readonly rows: readonly ScanOpportunity[];
@@ -19,38 +14,102 @@ export interface OpportunityTableProps {
   readonly compact?: boolean;
 }
 
-const MarketRow = ({ m, idx, isSel, compact }: {
-  readonly m: MonitoredMarket; readonly idx: number; readonly isSel: boolean; readonly compact?: boolean;
-}): React.JSX.Element => {
-  const trendCol = m.trend === 'BULLISH' ? 'green' : m.trend === 'BEARISH' ? 'red' : 'gray';
-  const regCol = m.regime.includes('UP') ? 'green' : m.regime.includes('DOWN') ? 'red' : 'yellow';
-  const live = liveQuote(m.symbol);
+export type MarketTableRow = {
+  n: string;
+  symbol: string;
+  ltp: string;
+  regime: string;
+  trend: string;
+  setups?: string;
+  status?: string;
+};
+
+export type OpportunityTableRow = {
+  n: string;
+  symbol: string;
+  setup: string;
+  rr: string;
+  state: string;
+  direction?: string;
+  tf?: string;
+  conf?: string;
+  regime?: string;
+};
+
+const shortSym = (symbol: string, n: number): string => symbol.replace('USDT', '').slice(0, n);
+
+export const toMarketTableRow = (
+  m: MonitoredMarket,
+  idx: number,
+  compact: boolean,
+  live: LtpQuote
+): MarketTableRow => {
   const px = live.ltp ?? m.price;
   const priceStr = px > 0 ? `$${fmtPrice(px)}` : '—';
-  const liveTag = live.live ? '' : '*';
-  const sym = m.symbol.replace('USDT', '').slice(0, 6).padEnd(6);
-
-  if (compact) {
-    const compactPx = `${priceStr}${liveTag}`.slice(0, 10).padEnd(10);
-    const compactReg = m.regime.slice(0, 7).padEnd(7);
-    const compactTr = m.trend.slice(0, 4);
-    return (
-      <Text wrap="truncate" color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-        {isSel ? '>' : ' '}{idx + 1} {sym} {compactPx} <Text color={isSel ? 'black' : regCol}>{compactReg}</Text> <Text color={isSel ? 'black' : trendCol}>{compactTr}</Text>
-      </Text>
-    );
-  }
-
-  return (
-    <Text color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-      {isSel ? '>' : ' '} {idx + 1}  {m.symbol.padEnd(10)} {`${priceStr}${liveTag ? ' ' + liveTag : ''}`.padEnd(14)}
-      <Text color={isSel ? 'black' : regCol}>{m.regime.padEnd(14)}</Text>
-      <Text color={isSel ? 'black' : trendCol}>{m.trend.padEnd(11)}</Text>
-      {String(m.setupsCount).padEnd(8)}
-      <Text color={isSel ? 'black' : 'gray'}>MONITORING (0/4 passed min 2.5 R:R)</Text>
-    </Text>
-  );
+  const row: MarketTableRow = {
+    n: String(idx + 1),
+    symbol: compact ? shortSym(m.symbol, 6) : m.symbol,
+    ltp: `${priceStr}${live.live ? '' : '*'}`,
+    regime: compact ? m.regime.slice(0, 7) : m.regime,
+    trend: compact ? m.trend.slice(0, 4) : m.trend,
+  };
+  if (compact) return row;
+  return { ...row, setups: String(m.setupsCount), status: 'MONITORING' };
 };
+
+export const toOpportunityTableRow = (
+  c: ScanOpportunity,
+  idx: number,
+  compact: boolean
+): OpportunityTableRow => {
+  const base: OpportunityTableRow = {
+    n: String(idx + 1),
+    symbol: compact ? shortSym(c.symbol, 5) : c.symbol,
+    setup: c.setup,
+    rr: c.rr.toFixed(1),
+    state: c.state,
+  };
+  if (compact) return base;
+  return { ...base, direction: c.direction, tf: c.tf, conf: c.confidence.toFixed(2), regime: c.regime };
+};
+
+const MARKET_COMPACT: TableColumn<MarketTableRow>[] = [
+  { key: 'n', header: '#' },
+  { key: 'symbol', header: 'SYM' },
+  { key: 'ltp', header: 'LTP', align: 'right' },
+  { key: 'regime', header: 'REGIME' },
+  { key: 'trend', header: 'TRND' },
+];
+
+const MARKET_FULL: TableColumn<MarketTableRow>[] = [
+  { key: 'n', header: '#' },
+  { key: 'symbol', header: 'SYMBOL' },
+  { key: 'ltp', header: 'LTP', align: 'right' },
+  { key: 'regime', header: 'REGIME' },
+  { key: 'trend', header: 'TREND' },
+  { key: 'setups', header: 'SETUPS' },
+  { key: 'status', header: 'STATUS' },
+];
+
+const OPP_COMPACT: TableColumn<OpportunityTableRow>[] = [
+  { key: 'n', header: '#' },
+  { key: 'symbol', header: 'SYM' },
+  { key: 'setup', header: 'SETUP' },
+  { key: 'rr', header: 'R:R', align: 'right' },
+  { key: 'state', header: 'STATE' },
+];
+
+const OPP_FULL: TableColumn<OpportunityTableRow>[] = [
+  { key: 'n', header: '#' },
+  { key: 'symbol', header: 'SYMBOL' },
+  { key: 'direction', header: 'DIR' },
+  { key: 'setup', header: 'SETUP' },
+  { key: 'tf', header: 'TF' },
+  { key: 'conf', header: 'CONF', align: 'right' },
+  { key: 'regime', header: 'REGIME' },
+  { key: 'rr', header: 'R:R', align: 'right' },
+  { key: 'state', header: 'STATE' },
+];
 
 const MonitoredMarketsTable = (p: {
   readonly markets: readonly MonitoredMarket[];
@@ -60,15 +119,15 @@ const MonitoredMarketsTable = (p: {
 }): React.JSX.Element => {
   useLiveTick();
   const safeIdx = Math.min(p.selectedIndex, p.markets.length - 1);
-  const header = p.compact
-    ? ' # SYM    LTP        REGIME  TRND'
-    : '   #  SYMBOL     LTP (LIVE)     REGIME        1H TREND   SETUPS  STATUS';
+  const data = p.markets.map((m, idx) => toMarketTableRow(m, idx, Boolean(p.compact), liveQuote(m.symbol)));
   return (
     <Box flexDirection="column">
-      <Text color="gray" wrap="truncate">{header}</Text>
-      {p.markets.map((m, idx) => (
-        <MarketRow key={m.symbol} m={m} idx={idx} isSel={idx === safeIdx} compact={p.compact} />
-      ))}
+      <Table
+        data={data}
+        columns={p.compact ? MARKET_COMPACT : MARKET_FULL}
+        framed={!p.compact}
+        highlightedIndex={safeIdx < 0 ? undefined : safeIdx}
+      />
       {p.isScanning ? (
         <Spinner label="Scanning markets..." type="dots" />
       ) : (
@@ -82,75 +141,54 @@ const MonitoredMarketsTable = (p: {
   );
 };
 
-const OpportunityRow = ({ c, idx, isSel, compact }: {
-  readonly c: ScanOpportunity; readonly idx: number; readonly isSel: boolean; readonly compact?: boolean;
-}): React.JSX.Element => {
-  const dirColor = c.direction === 'LONG' ? 'green' : 'red';
-  const stColor = stateColor(c.state);
-  const sym = c.symbol.replace('USDT', '').slice(0, 5).padEnd(5);
-
-  if (compact) {
-    const setup = c.setup.slice(0, 10).padEnd(10);
-    const rr = c.rr.toFixed(1).padStart(4);
-    const st = c.state.slice(0, 5).padEnd(5);
+const emptyState = (p: OpportunityTableProps): React.JSX.Element => {
+  if (p.markets && p.markets.length > 0) {
     return (
-      <Text key={`${c.symbol}-${c.setup}`} wrap="truncate" color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-        {isSel ? '>' : ' '}{idx + 1} {sym} <Text color={isSel ? 'black' : dirColor}>{setup}</Text> {rr} <Text color={isSel ? 'black' : stColor}>{st}</Text>
-      </Text>
+      <MonitoredMarketsTable
+        markets={p.markets}
+        selectedIndex={p.selectedIndex}
+        compact={p.compact}
+        isScanning={p.isScanning}
+      />
     );
   }
-
-  return (
-    <Text key={`${c.symbol}-${c.setup}`} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-      {isSel ? '>' : ' '} {idx + 1}  {c.symbol.padEnd(9)} <Text color={isSel ? 'black' : dirColor}>{c.direction.padEnd(6)}</Text>
-      {` ${c.setup.padEnd(17)} ${c.tf.padEnd(4)} ${c.confidence.toFixed(2)}   ${c.regime.padEnd(10)} ${c.rr.toFixed(1)}   `}
-      <Text color={isSel ? 'black' : stColor}>{c.state}</Text>
-    </Text>
-  );
+  if (p.isScanning) {
+    return <Spinner label="Initial market scan in progress... analyzing order book & MTF structure" type="dots" />;
+  }
+  return <Text color="gray" italic>Initializing market scan... run /scan or wait for auto-scan</Text>;
 };
 
 export const OpportunityTable = (p: OpportunityTableProps): React.JSX.Element => {
-  if (p.rows.length === 0) {
-    if (p.markets && p.markets.length > 0) {
-      return <MonitoredMarketsTable markets={p.markets} selectedIndex={p.selectedIndex} compact={p.compact} isScanning={p.isScanning} />;
-    }
-    if (p.isScanning) {
-      return <Spinner label="Initial market scan in progress... analyzing order book & MTF structure" type="dots" />;
-    }
-    return <Text color="gray" italic>Initializing market scan... run /scan or wait for auto-scan</Text>;
-  }
+  if (p.rows.length === 0) return emptyState(p);
   const safeIdx = Math.min(p.selectedIndex, p.rows.length - 1);
-  const header = p.compact
-    ? ' # SYM   SETUP       R:R STATE'
-    : '   #  SYMBOL    DIR    SETUP             TF   CONF   REGIME     R:R   STATE';
-
+  const data = p.rows.map((c, idx) => toOpportunityTableRow(c, idx, Boolean(p.compact)));
   return (
-    <Box flexDirection="column">
-      <Text color="gray" wrap="truncate">{header}</Text>
-      {p.rows.map((c, idx) => (
-        <OpportunityRow key={`${c.symbol}-${c.setup}`} c={c} idx={idx} isSel={idx === safeIdx} compact={p.compact} />
-      ))}
-    </Box>
+    <Table
+      data={data}
+      columns={p.compact ? OPP_COMPACT : OPP_FULL}
+      framed={!p.compact}
+      highlightedIndex={safeIdx < 0 ? undefined : safeIdx}
+    />
   );
 };
 
 export const OpportunityDetail = (p: { readonly row: ScanOpportunity }): React.JSX.Element => (
   <Box flexDirection="column">
     <Text bold color="yellow">SELECTED: {p.row.symbol} ({p.row.direction})</Text>
-    <Text color="gray">├─ Setup:        <Text color="white">{p.row.setup} ({p.row.tf})</Text></Text>
-    <Text color="gray">├─ Evidence MTF: <Text color="white">{p.row.mtf}</Text></Text>
-    <Text color="gray">├─ Thesis:       <Text color="white">"{p.row.thesis}"</Text></Text>
-    <Text color="gray">└─ Scanned:      <Text color="white">{p.row.scannedAt} │ conf={p.row.confidence.toFixed(2)} │ R:R={p.row.rr.toFixed(1)} │ {p.row.state}</Text></Text>
+    <Text color="gray">Setup: <Text color="white">{p.row.setup} ({p.row.tf})</Text></Text>
+    <Text color="gray">Evidence MTF: <Text color="white">{p.row.mtf}</Text></Text>
+    <Text color="gray">Thesis: <Text color="white">"{p.row.thesis}"</Text></Text>
+    <Text color="gray">Scanned: <Text color="white">{p.row.scannedAt} │ conf={p.row.confidence.toFixed(2)} │ R:R={p.row.rr.toFixed(1)} │ {p.row.state}</Text></Text>
   </Box>
 );
 
 export const MarketDetail = (p: { readonly market: MonitoredMarket }): React.JSX.Element => (
   <Box flexDirection="column">
     <Text bold color="yellow">MONITORED: {p.market.symbol}</Text>
-    <Text color="gray">├─ Mark Price:   <Text color="white">${p.market.price.toFixed(2)}</Text></Text>
-    <Text color="gray">├─ Regime:       <Text color="white">{p.market.regime}</Text></Text>
-    <Text color="gray">├─ 1H Trend:     <Text color="white">{p.market.trend}</Text></Text>
-    <Text color="gray">├─ Setups:       <Text color="white">{p.market.setupsCount} setups passed risk gate (min 2.5 R:R)</Text></Text>
-    <Text color="gray">└─ Last Scan:    <Text color="white">{p.market.scannedAt} │ Autonomous watcher active</Text></Text>
+    <Text color="gray">Mark Price: <Text color="white">${p.market.price.toFixed(2)}</Text></Text>
+    <Text color="gray">Regime: <Text color="white">{p.market.regime}</Text></Text>
+    <Text color="gray">1H Trend: <Text color="white">{p.market.trend}</Text></Text>
+    <Text color="gray">Setups: <Text color="white">{p.market.setupsCount} setups passed risk gate (min 2.5 R:R)</Text></Text>
+    <Text color="gray">Last Scan: <Text color="white">{p.market.scannedAt} │ Autonomous watcher active</Text></Text>
   </Box>
 );

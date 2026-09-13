@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import { Divider } from '../../components/ui/divider/index.js';
 import { StatusIndicator } from '../../components/ui/status-indicator/index.js';
 import { Badge } from '../../components/ui/badge/index.js';
+import { ProgressBar } from '../../components/ui/progress-bar/index.js';
 import { getKernel } from '../../kernel.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import type { MonitoredMarket, ScanOpportunity } from '../scan-opportunities.js';
@@ -123,7 +124,13 @@ const SidebarPortfolio = ({ snap, limits }: {
     <Text bold color="yellow">PORTFOLIO</Text>
     <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text></Text>
     <Text color="gray">Today <Text color={snap.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{snap.dailyRealizedPnl >= 0 ? '+' : ''}${snap.dailyRealizedPnl.toFixed(2)}</Text></Text>
-    <Text color="gray">Pos <Text color="white">{snap.openPositions}/{limits.maxConcurrentPositions}</Text> │ Lev <Text color="white">{limits.maxLeverage}x</Text></Text>
+    <ProgressBar
+      value={limits.maxConcurrentPositions === 0 ? 0 : (snap.openPositions / limits.maxConcurrentPositions) * 100}
+      width={16}
+      showPercent={false}
+      label={`Pos ${snap.openPositions}/${limits.maxConcurrentPositions}`}
+    />
+    <Text color="gray">Lev <Text color="white">{limits.maxLeverage}x</Text></Text>
   </Box>
 );
 

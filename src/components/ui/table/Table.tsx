@@ -21,6 +21,10 @@ export interface TableProps<T extends Record<string, unknown> = Record<string, u
   borderStyle?: BorderStyle;
   /** Theme override — defaults to darkTheme */
   theme?: InkUITheme;
+  /** Highlight this data-row index (cyan inverse) for keyboard selection */
+  highlightedIndex?: number;
+  /** When false, skip box-drawing chrome (compact sidebars) */
+  framed?: boolean;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -108,93 +112,82 @@ interface RowProps {
   textColor: string;
   bold?: boolean;
   dimColor?: boolean;
+  framed?: boolean;
+  highlight?: boolean;
 }
 
+const CellText = (p: {
+  readonly content: string;
+  readonly textColor: string;
+  readonly bold: boolean;
+  readonly dimColor: boolean;
+  readonly highlight: boolean;
+}): React.JSX.Element => (
+  <Text
+    color={p.highlight ? 'black' : p.textColor}
+    backgroundColor={p.highlight ? 'cyan' : undefined}
+    bold={p.bold}
+    dimColor={p.highlight ? false : p.dimColor}
+  >
+    {p.content}
+  </Text>
+);
+
 const Row: React.FC<RowProps> = ({
-  cells,
-  widths,
-  aligns,
-  borderChar,
-  borderColor,
-  textColor,
-  bold = false,
-  dimColor = false,
+  cells, widths, aligns, borderChar, borderColor, textColor,
+  bold = false, dimColor = false, framed = true, highlight = false,
 }) => (
   <Box>
     {cells.map((cell, i) => {
       const content = pad(truncate(cell, widths[i]!), widths[i]!, aligns[i]!);
       return (
         <Box key={i}>
-          <Text color={borderColor}>{borderChar}</Text>
+          {framed ? <Text color={borderColor}>{borderChar}</Text> : null}
           <Text> </Text>
-          <Text color={textColor} bold={bold} dimColor={dimColor}>
-            {content}
-          </Text>
+          <CellText content={content} textColor={textColor} bold={bold} dimColor={dimColor} highlight={highlight} />
           <Text> </Text>
         </Box>
       );
     })}
-    <Text color={borderColor}>{borderChar}</Text>
+    {framed ? <Text color={borderColor}>{borderChar}</Text> : null}
   </Box>
 );
 
 // ─── public component ─────────────────────────────────────────────────────────
 
 export function Table<T extends Record<string, unknown> = Record<string, unknown>>({
-  columns,
-  data,
-  borderStyle = 'single',
-  theme = darkTheme,
+  columns, data, borderStyle = 'single', theme = darkTheme,
+  highlightedIndex, framed = true,
 }: TableProps<T>) {
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 80;
-
-  const b       = borderStyles[borderStyle];
-  const widths  = resolveWidths(columns, data, termWidth);
-  const aligns  = columns.map((c) => c.align ?? 'left');
-
-  const topLine = buildBorderLine(b.topLeft,    b.top, b.topT,    b.topRight,    widths);
-  const midLine = buildBorderLine(b.leftT,      b.top, b.cross,   b.rightT,      widths);
-  const botLine = buildBorderLine(b.bottomLeft, b.top, b.bottomT, b.bottomRight, widths);
-
-  const headerCells = columns.map((c) => c.header);
+  const b = borderStyles[borderStyle];
+  const widths = resolveWidths(columns, data, termWidth);
+  const aligns = columns.map((c) => c.align ?? 'left');
   const borderColor = theme.colors.border;
-  const textColor   = theme.colors.text;
+  const rowBase = { widths, aligns, borderChar: b.left, borderColor, framed };
 
   return (
     <Box flexDirection="column">
-      {/* Top border */}
-      <Text color={borderColor}>{topLine}</Text>
-
-      {/* Header */}
-      <Row
-        cells={headerCells}
-        widths={widths}
-        aligns={aligns}
-        borderChar={b.left}
-        borderColor={borderColor}
-        textColor={theme.colors.primary}
-        bold
-      />
-
-      {/* Header/body separator */}
-      <Text color={borderColor}>{midLine}</Text>
-
-      {/* Data rows */}
+      {framed ? (
+        <Text color={borderColor}>{buildBorderLine(b.topLeft, b.top, b.topT, b.topRight, widths)}</Text>
+      ) : null}
+      <Row {...rowBase} cells={columns.map((c) => c.header)} textColor={theme.colors.primary} bold />
+      {framed ? (
+        <Text color={borderColor}>{buildBorderLine(b.leftT, b.top, b.cross, b.rightT, widths)}</Text>
+      ) : null}
       {data.map((row, ri) => (
         <Row
           key={ri}
+          {...rowBase}
           cells={columns.map((c) => cellStr(row[c.key]))}
-          widths={widths}
-          aligns={aligns}
-          borderChar={b.left}
-          borderColor={borderColor}
-          textColor={textColor}
+          textColor={theme.colors.text}
+          highlight={ri === highlightedIndex}
         />
       ))}
-
-      {/* Bottom border */}
-      <Text color={borderColor}>{botLine}</Text>
+      {framed ? (
+        <Text color={borderColor}>{buildBorderLine(b.bottomLeft, b.top, b.bottomT, b.bottomRight, widths)}</Text>
+      ) : null}
     </Box>
   );
 }
