@@ -6,6 +6,8 @@ import { useAgentChat, usePortfolio } from './app-hooks.js';
 import { runCommand } from './app-commands.js';
 import { useAutoScan, useStreamBoot } from './use-app-boot.js';
 import { onCouncilPipelineTrace } from '../engines/pipeline-trace-bus.js';
+import { onAlertEmitted } from '../engines/alerts/alert-bus.js';
+import { alertToTranscript } from './alert-transcript.js';
 import type { CouncilTrigger } from '../engines/council-types.js';
 import {
   agentEntry, councilTriggerEntry, pipelineToEntries, systemEntry,
@@ -121,6 +123,10 @@ const usePipelineIngest = (
   useEffect(() => onCouncilPipelineTrace(({ symbol, trace, trigger }) => {
     ingestPipeline(symbol, trace, trigger);
   }), [ingestPipeline]);
+
+  useEffect(() => onAlertEmitted((event) => {
+    pushTranscript(alertToTranscript(event));
+  }), [pushTranscript]);
 
   const clearOpportunities = useCallback((): void => {
     setOpportunities([]); setMarkets([]); setPipelineSnapshots({}); setPipelineCycle(0);

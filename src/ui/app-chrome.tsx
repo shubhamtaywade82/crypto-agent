@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text } from 'ink';
+import { TextInput } from '../components/ui/text-input/index.js';
 import { binanceRateLimiter } from '../guardians/rate-limiter.js';
 import { defaultModel } from '../config.js';
 import { getKernel } from '../kernel.js';
@@ -30,17 +31,19 @@ export const Header = ({ port, auto, mode }: {
 };
 
 export const PromptInput = (p: {
-  value: string; busy: boolean; onSubmit: () => void; onChange: (v: string) => void;
-  onHistoryUp?: () => void; onHistoryDown?: () => void;
-}): React.JSX.Element => {
-  const { exit } = useApp();
-  useInput((input, key) => {
-    if (key.ctrl && (input === 'c' || input === '\u0003')) exit();
-    else if (!p.busy && key.upArrow) p.onHistoryUp?.();
-    else if (!p.busy && key.downArrow) p.onHistoryDown?.();
-    else if (!p.busy && key.return) p.onSubmit();
-    else if (!p.busy && (key.backspace || key.delete)) p.onChange(p.value.slice(0, -1));
-    else if (!p.busy && !key.ctrl && !key.meta && input) p.onChange(p.value + input);
-  });
-  return <Box><Text bold color={p.busy ? 'gray' : 'green'}>&gt; </Text><Text>{p.value}</Text>{!p.busy && <Text color="green">█</Text>}</Box>;
-};
+  readonly value: string;
+  readonly busy: boolean;
+  readonly onSubmit: () => void;
+  readonly onChange: (v: string) => void;
+  readonly onHistoryUp?: () => void;
+  readonly onHistoryDown?: () => void;
+}): React.JSX.Element => (
+  <TextInput
+    value={p.value}
+    onChange={p.onChange}
+    onSubmit={() => p.onSubmit()}
+    focus={!p.busy}
+    onUpArrow={p.onHistoryUp}
+    onDownArrow={p.onHistoryDown}
+  />
+);

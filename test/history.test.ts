@@ -125,3 +125,58 @@ describe('runCommand', () => {
     expect(activities).toContain('Auto-trading PAUSED');
   });
 });
+
+describe('TextInput and ConsoleInput UI', () => {
+  it('instantiates TextInput and ConsoleInput components', async () => {
+    const { TextInput } = await import('../src/components/ui/text-input/index.js');
+    const { ConsoleInput } = await import('../src/ui/components/ConsoleInput.js');
+    expect(typeof TextInput).toBe('function');
+    expect(typeof ConsoleInput).toBe('function');
+  });
+
+  it('renders TextInput and ConsoleInput to stream', async () => {
+    const React = await import('react');
+    const { render } = await import('ink');
+    const { PassThrough } = await import('node:stream');
+    const { TextInput } = await import('../src/components/ui/text-input/index.js');
+    const { ConsoleInput } = await import('../src/ui/components/ConsoleInput.js');
+
+    const stream1 = new PassThrough();
+    let out1 = '';
+    stream1.on('data', (chunk) => { out1 += chunk.toString(); });
+    const i1 = render(React.createElement(TextInput, { value: 'my-cli-app', onChange: () => {} }), { stdout: stream1 as unknown as NodeJS.WriteStream });
+    i1.unmount();
+    expect(out1).toContain('my-cli-app');
+
+    const stream2 = new PassThrough();
+    let out2 = '';
+    stream2.on('data', (chunk) => { out2 += chunk.toString(); });
+    const i2 = render(React.createElement(ConsoleInput, { value: '/help', busy: false, onChange: () => {}, onSubmit: () => {} }), { stdout: stream2 as unknown as NodeJS.WriteStream });
+    i2.unmount();
+    expect(out2).toContain('/help');
+  });
+
+  it('renders password masking and label properly', async () => {
+    const React = await import('react');
+    const { render } = await import('ink');
+    const { PassThrough } = await import('node:stream');
+    const { TextInput } = await import('../src/components/ui/text-input/index.js');
+
+    const stream = new PassThrough();
+    let out = '';
+    stream.on('data', (chunk) => { out += chunk.toString(); });
+    const i = render(
+      React.createElement(TextInput, {
+        value: 'secret123',
+        password: true,
+        label: 'Password',
+        onChange: () => {},
+      }),
+      { stdout: stream as unknown as NodeJS.WriteStream }
+    );
+    i.unmount();
+    expect(out).toContain('Password');
+    expect(out).toContain('*********');
+    expect(out).not.toContain('secret123');
+  });
+});

@@ -1,136 +1,149 @@
-import React, { useState } from 'react';
-import { Box, Text, useInput, useApp, useStdin } from 'ink';
+import React, { useEffect, useRef, useState } from 'react';
+import { Box, Text, useApp, useInput, useStdin } from 'ink';
 import { darkTheme } from '../_core.js';
 import type { InkUITheme } from '../_core.js';
 
 export interface TextInputProps {
   /** Controlled value */
-  value: string;
+  readonly value: string;
   /** Called on every keystroke with the new value */
-  onChange: (value: string) => void;
+  readonly onChange: (value: string) => void;
   /** Called when Enter is pressed */
-  onSubmit?: (value: string) => void;
+  readonly onSubmit?: (value: string) => void;
   /** Shown when value is empty */
-  placeholder?: string;
+  readonly placeholder?: string;
   /** Mask input characters as * */
-  password?: boolean;
+  readonly password?: boolean;
   /** Whether this input captures keyboard input */
-  focus?: boolean;
+  readonly focus?: boolean;
   /** Optional label rendered to the left */
-  label?: string;
+  readonly label?: string;
   /** Theme override — defaults to darkTheme */
-  theme?: InkUITheme;
+  readonly theme?: InkUITheme;
+  /** Optional callback when Up Arrow is pressed */
+  readonly onUpArrow?: () => void;
+  /** Optional callback when Down Arrow is pressed */
+  readonly onDownArrow?: () => void;
+  /** Optional callback when Escape is pressed */
+  readonly onEscape?: () => void;
 }
 
-// ─── shared display ──────────────────────────────────────────────────────────
-
-interface DisplayProps {
-  value: string;
-  placeholder: string;
-  password: boolean;
-  isFocused: boolean;
-  cursor: number;
-  theme: InkUITheme;
+interface KeyHandlerContext {
+  readonly value: string;
+  readonly cursor: number;
+  readonly setCursor: React.Dispatch<React.SetStateAction<number>>;
+  readonly onChange: (v: string) => void;
+  readonly onSubmit?: (v: string) => void;
+  readonly onUpArrow?: () => void;
+  readonly onDownArrow?: () => void;
+  readonly onEscape?: () => void;
+  readonly lastInternalValue: React.MutableRefObject<string>;
+  readonly exit: () => void;
 }
 
-const InputDisplay: React.FC<DisplayProps> = ({
-  value,
-  placeholder,
-  password,
-  isFocused,
-  cursor,
-  theme,
-}) => {
-  const display = password ? '*'.repeat(value.length) : value;
-  const isEmpty = value.length === 0;
+interface RenderContentOpts {
+  readonly display: string;
+  readonly cursorPos: number;
+  readonly isFocused: boolean;
+  readonly placeholder: string;
+  readonly theme: InkUITheme;
+}
 
-  const cursorBlock = (char: string) => (
-    <Text key="cursor" color={theme.colors.focus} inverse>
-      {char}
-    </Text>
-  );
-
-  if (!isFocused) {
-    return isEmpty ? (
-      <Text color={theme.colors.muted}>{placeholder}</Text>
-    ) : (
-      <Text>{display}</Text>
-    );
+const renderCursorChar = (char: string | undefined, theme: InkUITheme): React.JSX.Element => {
+  if (char === undefined || char === ' ') {
+    return <Text key="cursor" color={theme.colors.focus}>█</Text>;
   }
+  return <Text key="cursor" color={theme.colors.focus} inverse>{char}</Text>;
+};
 
-  if (isEmpty) {
-    if (placeholder.length === 0) return cursorBlock(' ');
+const renderInputContent = (opts: RenderContentOpts): React.JSX.Element => {
+  const { display, cursorPos, isFocused, placeholder, theme } = opts;
+  if (!isFocused) {
+    if (display.length === 0) return <Text color={theme.colors.muted}>{placeholder}</Text>;
+    return <Text color={theme.colors.text}>{display}</Text>;
+  }
+  if (display.length === 0) {
     return (
       <Box>
-        {cursorBlock(placeholder[0]!)}
-        <Text key="rest" color={theme.colors.muted}>{placeholder.slice(1)}</Text>
+        <Text color={theme.colors.focus}>█</Text>
+        {placeholder ? <Text color={theme.colors.muted}>{placeholder}</Text> : null}
       </Box>
     );
   }
-
-  const before = display.slice(0, cursor);
-  const at     = display[cursor] ?? ' ';
-  const after  = display.slice(cursor + 1);
-
+  const safeCursor = Math.min(Math.max(0, cursorPos), display.length);
+  const before = display.slice(0, safeCursor);
+  const at = display[safeCursor];
+  const after = display.slice(safeCursor + 1);
   return (
     <Box>
-      {before ? <Text key="before">{before}</Text> : null}
-      {cursorBlock(at)}
-      {after  ? <Text key="after">{after}</Text>   : null}
+      {before ? <Text color={theme.colors.text}>{before}</Text> : null}
+      {renderCursorChar(at, theme)}
+      {after ? <Text color={theme.colors.text}>{after}</Text> : null}
     </Box>
   );
 };
 
-// ─── focused inner (mounts only when raw mode is available) ──────────────────
-
-interface FocusedInputProps extends TextInputProps {
-  theme: InkUITheme;
-}
-
-const FocusedInput: React.FC<FocusedInputProps> = ({
-  value,
-  onChange,
-  onSubmit,
-  placeholder = '',
-  password = false,
-  theme,
-}) => {
-  const { exit } = useApp();
-  const [cursor, setCursor] = useState(value.length);
-
-  useInput((input, key) => {
-    if (key.ctrl && input === 'c') { exit(); return; }
-
-    if (key.leftArrow)  { setCursor((c) => Math.max(0, c - 1));               return; }
-    if (key.rightArrow) { setCursor((c) => Math.min(value.length, c + 1));    return; }
-
-    if (key.backspace || key.delete) {
-      if (cursor === 0) return;
-      onChange(value.slice(0, cursor - 1) + value.slice(cursor));
-      setCursor((c) => c - 1);
-      return;
-    }
-
-    if (key.return) { onSubmit?.(value); return; }
-    if (key.ctrl || key.meta || key.escape) return;
-
-    onChange(value.slice(0, cursor) + input + value.slice(cursor));
-    setCursor((c) => c + input.length);
-  });
-
-  return (
-    <InputDisplay
-      value={value}
-      placeholder={placeholder}
-      password={password}
-      isFocused
-      cursor={cursor}
-      theme={theme}
-    />
-  );
+const applyTextChange = (ctx: KeyHandlerContext, nextVal: string, nextCursor?: number): void => {
+  ctx.lastInternalValue.current = nextVal;
+  if (nextCursor !== undefined) ctx.setCursor(nextCursor);
+  ctx.onChange(nextVal);
 };
 
-// ─── public component ─────────────────────────────────────────────────────────
+const handleNavKeys = (
+  input: string,
+  key: Parameters<Parameters<typeof useInput>[0]>[1],
+  ctx: KeyHandlerContext
+): boolean => {
+  if (key.leftArrow) {
+    ctx.setCursor((c) => Math.max(0, Math.min(c, ctx.value.length) - 1));
+    return true;
+  }
+  if (key.rightArrow) {
+    ctx.setCursor((c) => Math.min(ctx.value.length, Math.max(0, c) + 1));
+    return true;
+  }
+  if (key.ctrl && input === 'a') {
+    ctx.setCursor(0);
+    return true;
+  }
+  if (key.ctrl && input === 'e') {
+    ctx.setCursor(ctx.value.length);
+    return true;
+  }
+  if (key.upArrow) { ctx.onUpArrow?.(); return true; }
+  if (key.downArrow) { ctx.onDownArrow?.(); return true; }
+  return false;
+};
+
+const handleEditKeys = (
+  input: string,
+  key: Parameters<Parameters<typeof useInput>[0]>[1],
+  ctx: KeyHandlerContext
+): boolean => {
+  if (key.ctrl && (input === 'c' || input === '\u0003')) { ctx.exit(); return true; }
+  if (key.escape) { ctx.onEscape?.(); return true; }
+  if (key.return) { ctx.onSubmit?.(ctx.value); return true; }
+  const c = Math.min(Math.max(0, ctx.cursor), ctx.value.length);
+  if (key.delete && c < ctx.value.length) {
+    applyTextChange(ctx, ctx.value.slice(0, c) + ctx.value.slice(c + 1));
+    return true;
+  }
+  if (key.backspace && c > 0) {
+    applyTextChange(ctx, ctx.value.slice(0, c - 1) + ctx.value.slice(c), c - 1);
+    return true;
+  }
+  return false;
+};
+
+const handleCharInput = (
+  input: string,
+  key: Parameters<Parameters<typeof useInput>[0]>[1],
+  ctx: KeyHandlerContext
+): void => {
+  if (key.ctrl || key.meta || key.tab || key.pageUp || key.pageDown || !input) return;
+  const c = Math.min(Math.max(0, ctx.cursor), ctx.value.length);
+  applyTextChange(ctx, ctx.value.slice(0, c) + input + ctx.value.slice(c), c + input.length);
+};
 
 export const TextInput: React.FC<TextInputProps> = ({
   value,
@@ -141,34 +154,43 @@ export const TextInput: React.FC<TextInputProps> = ({
   focus = true,
   label,
   theme = darkTheme,
+  onUpArrow,
+  onDownArrow,
+  onEscape,
 }) => {
+  const { exit } = useApp();
   const { isRawModeSupported } = useStdin();
-  const canFocus = focus && isRawModeSupported;
+  const [cursor, setCursor] = useState(value.length);
+  const lastInternalValue = useRef(value);
+
+  // Sync cursor when value is modified externally (e.g. form reset, history navigation)
+  useEffect(() => {
+    if (value !== lastInternalValue.current) {
+      lastInternalValue.current = value;
+      setCursor(value.length);
+    }
+  }, [value]);
+
+  const ctx: KeyHandlerContext = {
+    value, cursor, setCursor, onChange, onSubmit,
+    onUpArrow, onDownArrow, onEscape, lastInternalValue, exit,
+  };
+
+  useInput(
+    (input, key) => {
+      const handled = handleNavKeys(input, key, ctx) || handleEditKeys(input, key, ctx);
+      if (!handled) handleCharInput(input, key, ctx);
+    },
+    { isActive: focus && Boolean(isRawModeSupported) }
+  );
+
+  const display = password ? '*'.repeat(value.length) : value;
 
   return (
     <Box>
       {label ? <Text color={theme.colors.muted}>{label} </Text> : null}
       <Text color={theme.colors.border}>{'❯ '}</Text>
-      {canFocus ? (
-        <FocusedInput
-          value={value}
-          onChange={onChange}
-          onSubmit={onSubmit}
-          placeholder={placeholder}
-          password={password}
-          focus={focus}
-          theme={theme}
-        />
-      ) : (
-        <InputDisplay
-          value={value}
-          placeholder={placeholder}
-          password={password}
-          isFocused={false}
-          cursor={value.length}
-          theme={theme}
-        />
-      )}
+      {renderInputContent({ display, cursorPos: cursor, isFocused: focus, placeholder, theme })}
     </Box>
   );
 };

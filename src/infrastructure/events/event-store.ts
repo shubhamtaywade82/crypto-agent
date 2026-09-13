@@ -54,6 +54,7 @@ export class EventStore {
   private readonly buffer: KernelEvent[] = [];
   private writeFailures = 0;
   private lastWriteError?: string;
+  private readonly listeners = new Set<(event: KernelEvent) => void>();
 
   constructor(filePathOrOpts?: string | EventStoreOptions) {
     const opts: EventStoreOptions =
@@ -100,9 +101,21 @@ export class EventStore {
     }
   }
 
+  onAppend(fn: (event: KernelEvent) => void): () => void {
+    this.listeners.add(fn);
+    return (): void => { this.listeners.delete(fn); };
+  }
+
+  private notify(full: KernelEvent): void {
+    for (const fn of this.listeners) {
+      try { fn(full); } catch { /* producers must not break the audit log */ }
+    }
+  }
+
   private push(full: KernelEvent): void {
     this.buffer.push(full);
     this.trimBuffer();
+    this.notify(full);
   }
 
   private parseTailLines(lines: string[], limit: number): KernelEvent[] {

@@ -19,7 +19,7 @@ const entryToTimelineItem = (e: TranscriptEntry): ActivityTimelineItem => {
   let level: ActivityTimelineItem['level'] = 'INFO';
   if (text.includes('ERR') || text.includes('REJECT') || text.includes('HALT')) level = 'ERROR';
   else if (text.includes('WARN') || text.includes('BREACH')) level = 'WARN';
-  else if (text.includes('FILLED') || text.includes('APPROVED') || text.includes('PASSED')) level = 'SUCCESS';
+  else if (text.includes('FILLED') || text.includes('APPROVED') || text.includes('PASSED') || text.includes('[ SIGNAL ]')) level = 'SUCCESS';
   return { id: e.id, at: e.at, actor, level, summary: `${e.title}: ${e.lines[0] ?? ''}`, detail: e.lines.slice(1).join('\n') };
 };
 

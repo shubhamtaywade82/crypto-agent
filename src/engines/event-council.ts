@@ -2,18 +2,15 @@ import type { Candle, Timeframe } from '../domain/market/types.js';
 import type { CouncilTrigger } from './council-types.js';
 import type { PipelineTrace } from './pipeline.js';
 import { analyzeMarket } from '../agents/analyst-agent.js';
-import { buildMarketState } from './market-state-engine.js';
-import { scanMiEventsOnClose } from './mi-event-scan.js';
-import { detectSetups } from './setup-engine.js';
 import { getKernel, type TradingKernel } from '../kernel.js';
 import { defaultModel, ollamaClient } from '../config.js';
 import { eventTypesForCouncil } from './mi-evidence.js';
 import { getMiEvidenceCache, warmMiEvidence } from './mi-evidence-cache.js';
-import { sendCouncilTelegram } from '../notifications/council-telegram.js';
-import { sendMarketEventAlert, sendTriggerAlert } from '../notifications/signal-telegram.js';
 import type { BinanceMarketStream } from '../infrastructure/binance/market-stream.js';
 import { kernelWatchSymbols } from '../kernel-streams.js';
 import { emitCouncilPipelineTrace } from './pipeline-trace-bus.js';
+import { scanMiEventsOnClose, type MiFreshEvent } from './mi-event-scan.js';
+import { bootAlertRuntime, getAlertRuntime } from './alerts/runtime.js';
 
 export type { CouncilTrigger } from './council-types.js';
 
@@ -22,20 +19,16 @@ const councilEnabled = (): boolean => process.env.EVENT_COUNCIL_ENABLED !== 'fal
 const cooldownMs = (): number => Number(process.env.COUNCIL_COOLDOWN_MS ?? 900_000);
 
 const candleTfs = (): Set<Timeframe> => {
-  const raw = process.env.COUNCIL_CANDLE_TFS ?? '1h,4h';
+  const raw = process.env.COUNCIL_CANDLE_TFS ?? '5m,15m,1h,4h';
   return new Set(raw.split(',').map((s) => s.trim()) as Timeframe[]);
 };
-
-const miEventsEnabled = (): boolean => process.env.MI_EVENT_COUNCIL !== 'false';
-
-const candleCloseCouncil = (): boolean => process.env.COUNCIL_CANDLE_CLOSE === 'true';
 
 const llmMinConfidence = (): number => Number(process.env.COUNCIL_LLM_MIN_CONFIDENCE ?? 0.75);
 
 const shouldRunLlm = (trigger: CouncilTrigger, trace: PipelineTrace): boolean => {
   if (process.env.COUNCIL_LLM_ENABLED === 'false') return false;
-  if (trigger.type !== 'MARKET_EVENT') return true;
-  if (trace.setups.length === 0) return false;
+  if (trigger.type === 'PRICE_WATCH') return true;
+  if (trigger.type !== 'MARKET_EVENT') return false;
   return trace.setups.some((s) => s.confidence >= llmMinConfidence());
 };
 
@@ -52,13 +45,8 @@ const triggerKey = (trigger: CouncilTrigger): string => {
   return `${sym}:${trigger.type}`;
 };
 
-const alwaysNotify = (status: PipelineTrace['status']): boolean =>
-  status === 'EXECUTED' || status === 'APPROVED' || status === 'EXIT_SIGNALLED';
-
 export class EventCouncil {
   private readonly lastFired = new Map<string, number>();
-  private readonly lastRegime = new Map<string, string>();
-  private readonly lastSetupCount = new Map<string, number>();
   private readonly seenMiEvents = new Map<string, Set<string>>();
   private wired = false;
 
@@ -70,15 +58,13 @@ export class EventCouncil {
     stream.onCandleClose((symbol, timeframe) => { void this.onCandleClose(symbol, timeframe); });
   }
 
-  seedSnapshot(symbol: string, regime: string, setupCount: number): void {
-    this.lastRegime.set(symbol, regime);
-    this.lastSetupCount.set(symbol, setupCount);
+  seedSnapshot(_symbol: string, _regime: string, _setupCount: number): void {
+    /* regime/setup snapshots live on AlertRuntime trackers */
   }
 
   private shouldFire(trigger: CouncilTrigger): boolean {
     if (!councilEnabled()) return false;
-    const key = triggerKey(trigger);
-    const last = this.lastFired.get(key) ?? 0;
+    const last = this.lastFired.get(triggerKey(trigger)) ?? 0;
     return Date.now() - last >= cooldownMs();
   }
 
@@ -88,11 +74,12 @@ export class EventCouncil {
 
   async onCandleClose(symbol: string, timeframe: Timeframe): Promise<void> {
     if (!candleTfs().has(timeframe)) return;
-    if (miEventsEnabled()) await this.scanMarketIntel(symbol, timeframe);
-    else if (candleCloseCouncil()) {
-      await this.dispatch({ type: 'CANDLE_CLOSE', symbol, timeframe });
+    const fresh = await this.scanMarketIntel(symbol, timeframe);
+    try {
+      await getAlertRuntime(this.kernel).ingest(symbol, timeframe, fresh);
+    } catch {
+      /* runtime may not be booted in unit tests */
     }
-    await this.checkMarketShift(symbol);
   }
 
   private miSeenKey(symbol: string, timeframe: Timeframe): string {
@@ -120,7 +107,7 @@ export class EventCouncil {
     return this.kernel.provider.getKlines(symbol, timeframe, 300);
   }
 
-  private async scanMarketIntel(symbol: string, timeframe: Timeframe): Promise<void> {
+  private async scanMarketIntel(symbol: string, timeframe: Timeframe): Promise<readonly MiFreshEvent[]> {
     const sym = symbol.toUpperCase();
     const candles = await this.candlesForScan(sym, timeframe);
     const seen = this.seenMi(sym, timeframe);
@@ -131,58 +118,27 @@ export class EventCouncil {
         type: 'mi.event.detected', symbol: sym,
         payload: { timeframe, eventType: ev.eventType, eventId: ev.eventId, label: ev.label },
       });
-      await sendMarketEventAlert(sym, timeframe, ev);
-      await this.dispatch({
-        type: 'MARKET_EVENT', symbol: sym, timeframe,
-        eventType: ev.eventType, eventId: ev.eventId,
-        direction: ev.direction, label: ev.label,
-      });
     }
-  }
-
-  private async checkMarketShift(symbol: string): Promise<void> {
-    const mtf = await buildMarketState(this.kernel.provider, symbol);
-    const regime = mtf.state.regime;
-    const prev = this.lastRegime.get(symbol);
-    this.lastRegime.set(symbol, regime);
-    if (prev && prev !== regime) {
-      await sendTriggerAlert({ type: 'REGIME_CHANGE', symbol, from: prev, to: regime });
-      await this.dispatch({ type: 'REGIME_CHANGE', symbol, from: prev, to: regime });
-    }
-    const count = detectSetups(mtf, this.kernel.limits).length;
-    const prevCount = this.lastSetupCount.get(symbol) ?? 0;
-    this.lastSetupCount.set(symbol, count);
-    if (count > 0 && count > prevCount) {
-      await sendTriggerAlert({ type: 'SETUP_DETECTED', symbol, count });
-      await this.dispatch({ type: 'SETUP_DETECTED', symbol, count });
-    }
+    return fresh;
   }
 
   async dispatch(trigger: CouncilTrigger): Promise<PipelineTrace | undefined> {
     if (!councilEnabled()) return undefined;
     const symbol = symbolOf(trigger);
-    const skipCooldown = trigger.type === 'PRICE_WATCH' || trigger.type === 'MARKET_EVENT';
+    const skipCooldown = trigger.type === 'PRICE_WATCH';
     if (!skipCooldown && !this.shouldFire(trigger)) return undefined;
     return this.kernel.lanes.enqueue(symbol, async () => {
       const trace = await this.kernel.runPipeline(symbol);
       emitCouncilPipelineTrace({ symbol, trace, trigger });
-      if (!skipCooldown && !alwaysNotify(trace.status) && !this.shouldFire(trigger)) return trace;
       this.markFired(trigger);
-      const types = eventTypesForCouncil(trigger, trace.setups);
-      const evidence = await getMiEvidenceCache().blockFor(this.kernel, symbol, types);
-      const analysis = trace.state && shouldRunLlm(trigger, trace)
-        ? await analyzeMarket(ollamaClient, defaultModel, trace.state, evidence)
-        : trace.analysis;
-      const notifyCouncil =
-        alwaysNotify(trace.status) ||
-        shouldRunLlm(trigger, trace) ||
-        trigger.type === 'PRICE_WATCH';
-      if (notifyCouncil) {
-        await sendCouncilTelegram(trigger, trace, analysis, evidence);
+      if (trace.state && shouldRunLlm(trigger, trace)) {
+        const types = eventTypesForCouncil(trigger, trace.setups);
+        const evidence = await getMiEvidenceCache().blockFor(this.kernel, symbol, types);
+        await analyzeMarket(ollamaClient, defaultModel, trace.state, evidence);
       }
       this.kernel.store.append({
         type: 'council.notified', symbol,
-        payload: { trigger: trigger.type, status: trace.status },
+        payload: { trigger: trigger.type, status: trace.status, telegram: false },
       });
       return trace;
     });
@@ -207,18 +163,11 @@ export const dispatchCouncil = (trigger: CouncilTrigger): Promise<PipelineTrace 
 
 export const bootEventCouncil = (kernel: TradingKernel = getKernel()): EventCouncil => {
   const council = wireEventCouncil(kernel);
-  const symbols = kernelWatchSymbols();
-  seedCouncilSymbols(symbols);
-  warmMiEvidence(kernel, symbols);
+  bootAlertRuntime(kernel);
+  warmMiEvidence(kernel, kernelWatchSymbols());
   return council;
 };
 
-export const seedCouncilSymbols = (symbols: readonly string[]): void => {
-  const kernel = getKernel();
-  const council = getEventCouncil();
-  for (const sym of symbols) {
-    void buildMarketState(kernel.provider, sym).then((mtf) => {
-      council.seedSnapshot(sym, mtf.state.regime, detectSetups(mtf, kernel.limits).length);
-    });
-  }
+export const seedCouncilSymbols = (_symbols: readonly string[]): void => {
+  /* no-op: AlertRuntime seeds on first ingest */
 };
