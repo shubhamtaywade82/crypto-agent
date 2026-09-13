@@ -22,8 +22,8 @@ const TapeRows = ({ trades }: { readonly trades: readonly TradePrint[] }): React
 );
 
 const readTape = (symbol: string): { trades: readonly TradePrint[]; seq: number } => {
-  const snap = getKernel().marketStore.snapshot(symbol.toUpperCase());
-  return { trades: snap?.trades ?? [], seq: snap?.tradeSeq ?? 0 };
+  const book = getKernel().marketStore.peekBook(symbol.toUpperCase());
+  return { trades: book?.trades ?? [], seq: book?.tradeSeq ?? 0 };
 };
 
 export const useLiveTrades = (symbol: string): readonly TradePrint[] => {

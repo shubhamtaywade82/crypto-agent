@@ -34,7 +34,7 @@ export const hydrateSymbolMicro = async (
 export const hydrateWatchMicro = async (): Promise<void> => {
   const kernel = getKernel();
   for (const sym of kernelWatchSymbols()) {
-    const snap = kernel.marketStore.snapshot(sym);
+    const snap = kernel.marketStore.peekBook(sym);
     if ((snap?.bids.length ?? 0) > 0) continue;
     await hydrateSymbolMicro(kernel.provider, kernel.marketStore, sym);
   }
@@ -45,10 +45,10 @@ export const ensureSymbolTracked = async (symbol: string): Promise<boolean> => {
   const kernel = getKernel();
   const sym = symbol.toUpperCase();
   await kernel.streams.market?.ensure(sym);
-  if ((kernel.marketStore.snapshot(sym)?.bids.length ?? 0) === 0) {
+  if ((kernel.marketStore.peekBook(sym)?.bids.length ?? 0) === 0) {
     await hydrateSymbolMicro(kernel.provider, kernel.marketStore, sym);
   }
-  return (kernel.marketStore.snapshot(sym)?.bids.length ?? 0) > 0;
+  return (kernel.marketStore.peekBook(sym)?.bids.length ?? 0) > 0;
 };
 
 const TAPE_STALE_MS = 2_500;
@@ -57,7 +57,7 @@ const TAPE_STALE_MS = 2_500;
 export const refreshSymbolTape = async (symbol: string): Promise<void> => {
   const kernel = getKernel();
   const sym = symbol.toUpperCase();
-  const snap = kernel.marketStore.snapshot(sym);
+  const snap = kernel.marketStore.peekBook(sym);
   const lastAt = snap?.trades[snap.trades.length - 1]?.at;
   if (lastAt !== undefined && Date.now() - lastAt < TAPE_STALE_MS) return;
   try {

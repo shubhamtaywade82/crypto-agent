@@ -5,7 +5,7 @@ import { hydrateWatchMicro } from '../engines/market-hydrate.js';
 import { kernelWatchSymbols } from '../kernel-streams.js';
 
 const hasMicroData = (): boolean =>
-  kernelWatchSymbols().some((sym) => (getKernel().marketStore.snapshot(sym)?.bids.length ?? 0) > 0);
+  kernelWatchSymbols().some((sym) => (getKernel().marketStore.peekBook(sym)?.bids.length ?? 0) > 0);
 
 export const useStreamBoot = (): boolean => {
   const [live, setLive] = useState(false);

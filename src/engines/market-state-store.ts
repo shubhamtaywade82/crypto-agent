@@ -3,12 +3,6 @@ import { TIMEFRAMES } from '../domain/market/types.js';
 import type { BookLevel, MicrostructureView, TradePrint } from '../domain/market/microstructure.js';
 import { computeMicrostructure } from './microstructure-engine.js';
 
-/**
- * In-memory market-state cache fed by the Binance WS streams (event-driven
- * runtime) with REST as the cold-start/recovery backfill path. Deterministic:
- * candles are keyed by openTime and kept sorted, so replaying the same
- * updates always produces the same book.
- */
 export interface SymbolSnapshot {
   readonly symbol: string;
   readonly candles: Readonly<Record<Timeframe, readonly Candle[]>>;
@@ -80,7 +74,17 @@ const CANDLE_CAP: Readonly<Record<Timeframe, number>> = {
   '5m': 300, '15m': 300, '1h': 300, '4h': 220,
 };
 
-/** Per-symbol mutable book (never leaves the store un-cloned). */
+const trimOldest = (map: Map<number, Candle>, cap: number): void => {
+  if (map.size <= cap) return;
+  const keys = [...map.keys()].sort((a, b) => a - b);
+  const drop = map.size - cap;
+  for (let i = 0; i < drop; i++) map.delete(keys[i]!);
+};
+
+const capCandles = (map: Map<number, Candle>, cap: number): Candle[] => {
+  const sorted = [...map.values()].sort((a, b) => a.openTime - b.openTime);
+  return sorted.length > cap ? sorted.slice(sorted.length - cap) : sorted;
+};
 interface SymbolBook {
   readonly candles: Map<Timeframe, Map<number, Candle>>;
   last?: number;
@@ -107,11 +111,6 @@ const emptyBook = (): SymbolBook => ({
   tradeSeq: 0,
 });
 
-const capCandles = (map: Map<number, Candle>, cap: number): Candle[] => {
-  const sorted = [...map.values()].sort((a, b) => a.openTime - b.openTime);
-  return sorted.length > cap ? sorted.slice(sorted.length - cap) : sorted;
-};
-
 export class MarketStateStore {
   private readonly books = new Map<string, SymbolBook>();
 
@@ -131,7 +130,10 @@ export class MarketStateStore {
   /** Replace-or-insert a candle keyed by openTime (WS sends in-progress updates). */
   upsertKline(u: KlineUpdate): void {
     const b = this.book(u.symbol);
-    b.candles.get(u.timeframe)?.set(u.candle.openTime, u.candle);
+    const map = b.candles.get(u.timeframe);
+    if (!map) return;
+    map.set(u.candle.openTime, u.candle);
+    trimOldest(map, CANDLE_CAP[u.timeframe]);
     this.touch(b, u.at);
   }
 
@@ -139,7 +141,9 @@ export class MarketStateStore {
   backfillCandles(symbol: string, timeframe: Timeframe, candles: readonly Candle[], at: number): void {
     const b = this.book(symbol);
     const map = b.candles.get(timeframe);
-    if (map) for (const c of candles) map.set(c.openTime, c);
+    if (!map) return;
+    for (const c of candles) map.set(c.openTime, c);
+    trimOldest(map, CANDLE_CAP[timeframe]);
     this.touch(b, at);
   }
 
@@ -220,7 +224,33 @@ export class MarketStateStore {
     return computeMicrostructure({ bids: b.bids, asks: b.asks }, b.trades, mid, b.lastEventAt ?? Date.now());
   }
 
-  /** Full snapshot for one symbol (undefined when nothing was ever stored). */
+  peekQuote(symbol: string): {
+    readonly last?: number; readonly mark?: number; readonly bid?: number; readonly ask?: number;
+  } | undefined {
+    const b = this.books.get(symbol);
+    if (!b || b.lastEventAt === undefined) return undefined;
+    return { last: b.last, mark: b.mark, bid: b.bestBid ?? b.bids[0]?.price, ask: b.bestAsk ?? b.asks[0]?.price };
+  }
+
+  peekBook(symbol: string): {
+    readonly bids: readonly BookLevel[]; readonly asks: readonly BookLevel[];
+    readonly last?: number; readonly mark?: number;
+    readonly microstructure?: MicrostructureView;
+    readonly trades: readonly TradePrint[]; readonly tradeSeq: number;
+  } | undefined {
+    const b = this.books.get(symbol);
+    if (!b || b.lastEventAt === undefined) return undefined;
+    return {
+      bids: b.bids, asks: b.asks, last: b.last, mark: b.mark,
+      microstructure: this.microstructureOf(symbol),
+      trades: b.trades, tradeSeq: b.tradeSeq,
+    };
+  }
+
+  ladderSize(symbol: string, timeframe: Timeframe): number {
+    return this.books.get(symbol)?.candles.get(timeframe)?.size ?? 0;
+  }
+
   snapshot(symbol: string): SymbolSnapshot | undefined {
     const b = this.books.get(symbol);
     if (!b || b.lastEventAt === undefined) return undefined;
@@ -246,7 +276,6 @@ export class MarketStateStore {
     };
   }
 
-  /** Age of the most recent event for the symbol; undefined = never seen. */
   stalenessMs(symbol: string, now: number = Date.now()): number | undefined {
     const b = this.books.get(symbol);
     if (!b || b.lastEventAt === undefined) return undefined;

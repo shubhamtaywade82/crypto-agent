@@ -97,7 +97,12 @@ export class EventCouncil {
   }
 
   private rememberMi(symbol: string, timeframe: Timeframe, eventId: string): void {
-    this.seenMi(symbol, timeframe).add(eventId);
+    const set = this.seenMi(symbol, timeframe);
+    set.add(eventId);
+    if (set.size <= 2000) return;
+    const keep = [...set].slice(-1000);
+    set.clear();
+    for (const id of keep) set.add(id);
   }
 
   private async candlesForScan(symbol: string, timeframe: Timeframe): Promise<readonly Candle[]> {

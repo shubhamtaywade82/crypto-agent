@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { getKernel } from '../kernel.js';
 import type { BookLevel, MicrostructureView, TradePrint } from '../domain/market/microstructure.js';
-import type { SymbolSnapshot } from '../engines/market-state-store.js';
 import { ensureSymbolTracked } from '../engines/market-hydrate.js';
 import { LiveTape } from './components/LiveTape.js';
 
@@ -35,13 +34,14 @@ const fmtVolCol = (v: number): string => fmtVol(v).padStart(W_VOL);
 const fmtPxCol = (p: number): string => fmtPrice(p).padStart(W_PX);
 const leftPad = W_QTY + 1 + W_VOL + 1 + W_PX;
 
-export const quotePrice = (snap: SymbolSnapshot | undefined): number | undefined => {
-  if (!snap) return undefined;
-  if (snap.last !== undefined) return snap.last;
-  if (snap.trades.length > 0) return snap.trades[snap.trades.length - 1]?.price;
-  if (snap.mark !== undefined) return snap.mark;
-  if (snap.bestBid !== undefined && snap.bestAsk !== undefined) return (snap.bestBid + snap.bestAsk) / 2;
-  if (snap.bids[0] && snap.asks[0]) return (snap.bids[0].price + snap.asks[0].price) / 2;
+export const quotePrice = (q: {
+  readonly last?: number; readonly mark?: number;
+  readonly bid?: number; readonly ask?: number;
+} | undefined): number | undefined => {
+  if (!q) return undefined;
+  if (q.last !== undefined) return q.last;
+  if (q.mark !== undefined) return q.mark;
+  if (q.bid !== undefined && q.ask !== undefined) return (q.bid + q.ask) / 2;
   return undefined;
 };
 
@@ -199,15 +199,16 @@ export const SymbolRows = ({ symbols }: { symbols: readonly string[] }): React.J
   return (
     <Box flexDirection="column">
       {symbols.map((sym) => {
-        const snap = kernel.marketStore.snapshot(sym);
-        const m = snap?.microstructure;
-        const px = quotePrice(snap);
-        const stale = snap ? kernel.marketStore.stalenessMs(sym) : undefined;
+        const book = kernel.marketStore.peekBook(sym);
+        const q = kernel.marketStore.peekQuote(sym);
+        const m = book?.microstructure;
+        const px = quotePrice(q);
+        const stale = q ? kernel.marketStore.stalenessMs(sym) : undefined;
         return (
           <Text key={sym} wrap="truncate">
             <Text bold>{sym.replace('USDT', '')}</Text> {px !== undefined ? fmtPrice(px) : '…'}
             {m ? <Text color="gray"> spr {m.spreadBps.toFixed(1)}bps imb {(m.imbalance * 100).toFixed(0)}% {m.flowBias}</Text>
-              : <Text color="gray"> {snap ? 'awaiting depth' : 'not subscribed'}</Text>}
+              : <Text color="gray"> {book ? 'awaiting depth' : 'not subscribed'}</Text>}
             {stale !== undefined && stale > 30_000 ? <Text color="red"> STALE</Text> : null}
           </Text>
         );
@@ -232,7 +233,7 @@ export const KernelDashboard = ({
     const t = setInterval(() => setTick((n) => n + 1), 500);
     return (): void => clearInterval(t);
   }, [focusSymbol]);
-  const focus = getKernel().marketStore.snapshot(focusSymbol);
+  const focus = getKernel().marketStore.peekBook(focusSymbol);
 
   return (
     <Box flexDirection="column">

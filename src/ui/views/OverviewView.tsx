@@ -37,13 +37,13 @@ export interface OverviewViewProps {
 
 
 const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => {
-  const snap = getKernel().marketStore.snapshot(symbol);
+  const book = getKernel().marketStore.peekBook(symbol);
   return (
     <Box flexDirection="row" marginTop={1}>
       <Box width="50%" flexDirection="column" paddingRight={1}>
         <Text bold color="yellow">Depth ({symbol})</Text>
-        {snap?.bids.length ? (
-          <DepthLadder bids={snap.bids} asks={snap.asks} last={snap.last} mark={snap.mark} micro={snap.microstructure} />
+        {book?.bids.length ? (
+          <DepthLadder bids={book.bids} asks={book.asks} last={book.last} mark={book.mark} micro={book.microstructure} />
         ) : <Text color="gray">depth streaming…</Text>}
       </Box>
       <Box

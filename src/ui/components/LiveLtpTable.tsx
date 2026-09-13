@@ -42,13 +42,11 @@ export const useLiveTick = (): number => {
 
 export const liveQuote = (symbol: string): LtpQuote => {
   const kernel = getKernel();
-  const snap = kernel.marketStore.snapshot(symbol);
-  if (!snap) return { live: false };
+  const q = kernel.marketStore.peekQuote(symbol);
+  if (!q) return { live: false };
   const stale = (kernel.marketStore.stalenessMs(symbol) ?? Infinity) > STALE_MS;
-  const bid = snap.bestBid ?? snap.bids[0]?.price;
-  const ask = snap.bestAsk ?? snap.asks[0]?.price;
-  const ltp = snap.last ?? snap.mark ?? (bid !== undefined && ask !== undefined ? (bid + ask) / 2 : undefined);
-  return { ltp, bid, ask, mark: snap.mark, live: !stale && ltp !== undefined };
+  const ltp = q.last ?? q.mark ?? (q.bid !== undefined && q.ask !== undefined ? (q.bid + q.ask) / 2 : undefined);
+  return { ltp, bid: q.bid, ask: q.ask, mark: q.mark, live: !stale && ltp !== undefined };
 };
 
 export type LtpQuote = {

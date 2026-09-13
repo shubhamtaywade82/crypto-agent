@@ -39,6 +39,16 @@ describe('MarketStateStore — kline upsert semantics', () => {
     const times = snap.candles['1h'].map((c) => c.openTime);
     expect([...times].sort((a, b) => a - b)).toEqual(times);
     expect(times[0]).toBe(20 * 1000); // oldest trimmed
+    expect(store.ladderSize('BTCUSDT', '1h')).toBe(300);
+  });
+
+  it('peekQuote returns prices without requiring a candle snapshot', () => {
+    const store = new MarketStateStore();
+    store.setTicker({ symbol: 'SOLUSDT', price: 99.8, at: 1 });
+    store.setBookTicker({ symbol: 'SOLUSDT', bid: 99.79, ask: 99.81, at: 2 });
+    expect(store.peekQuote('SOLUSDT')?.last).toBe(99.8);
+    expect(store.peekQuote('SOLUSDT')?.bid).toBe(99.79);
+    expect(store.peekQuote('SOLUSDT')?.ask).toBe(99.81);
   });
 
   it('isolates timeframes and symbols', () => {
