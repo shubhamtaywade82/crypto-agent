@@ -245,3 +245,26 @@ research validity and execution fidelity, not architecture.
 
 **Acceptance:** chaos drills pass with invariants intact (no unauthorized risk, no lost
 order, audit trail complete); unauthenticated request to any trading endpoint fails closed.
+
+## Phase 9.2B — Diagnostic setup funnel (this branch)
+
+Zero trades on a long 5m replay is **not** evidence the strategy is good or bad.
+It is evidence that **activation probability is unknown**. This phase instruments
+the existing deterministic path **without changing production parameters**.
+
+- [x] `SetupFunnelObservation` per 5m bar: macro → bias → structure → liquidity
+      → zone → retest → trigger → confluence → RR → risk → executable
+- [x] `executable` is true only when live `detectSetups()` would emit a valid
+      candidate (funnel cannot invent fills)
+- [x] FVG/OB recorded as `FVG_OB_DETECTOR_ABSENT` and **excluded** from sequential
+      dead-gate (it is not a production conjunction)
+- [x] Frozen confluence threshold `0.75` (live default); RR from `RiskLimits`
+- [x] `POST /api/kernel/funnel/:symbol` (ADMIN) writes `funnel.completed` audit
+- [ ] Run the funnel on the 12-month SOL dataset and publish the dead-gate
+
+**Acceptance:** identical ladders yield identical reports; live `detectSetups`
+behavior is unchanged.
+
+Next (not started): 9.3 parameter-surface, 9.4 WFO already exists, 9.5 Monte Carlo,
+9.6 extra stats, 9.7 counterfactuals, Phase 10 LLM ranking **after** the funnel
+explains zero-trade activation.

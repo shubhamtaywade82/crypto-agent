@@ -10,6 +10,7 @@ import { ApiAuthenticator, auditCaller } from './security/auth.js';
 import type { AuthVariables } from './security/auth.js';
 import type { Capability } from './security/capabilities.js';
 import { analyticsSnapshot } from './learning/performance-analytics.js';
+import { handleFunnelPost } from './learning/funnel-http.js';
 import { runWalkForwardFromProvider } from './learning/walk-forward.js';
 import { loadRiskLimits } from './domain/risk/risk-config.js';
 import { DASHBOARD_HTML } from './ui/dashboard.js';
@@ -136,6 +137,8 @@ const oosResponseBody = (oos: WalkForwardResultAsync['oos']): Record<string, unk
     },
   })),
 });
+
+app.post('/api/kernel/funnel/:symbol', guard('ADMIN'), handleFunnelPost);
 
 app.post('/api/kernel/walkforward/:symbol', guard('ADMIN'), async (c) => {
   const kernel = getKernel();

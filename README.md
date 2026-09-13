@@ -256,6 +256,7 @@ routes (`/health`, `/metrics`) remain public for load balancers.
 | `/api/kernel/analytics` | `GET` | `READ_PORTFOLIO` | Performance summary (Sharpe/Sortino), per-strategy/symbol/regime segments, strategy registry, execution quality (slippage/latency/fills) |
 | `/api/kernel/streams` | `GET` | `READ_MARKET` | WS stream health: market/account state, staleness (ms) |
 | `/api/kernel/walkforward/:symbol` | `POST` | `ADMIN` | Deterministic walk-forward backtest with futures replay: per-(setup×regime) IS/OOS cell verdicts; body `{"apply": true}` promotes OOS-verified cells into the live registry |
+| `/api/kernel/funnel/:symbol` | `POST` | `ADMIN` | Phase 9.2B diagnostic funnel: per-gate pass rates on historical 5m bars (does not change live strategy parameters) |
 | `/api/kernel/killswitch/halt` | `POST` | `CONTROL_TRADE` | Halt all trading (`{ "reason": "..." }`) |
 | `/api/kernel/killswitch/resume` | `POST` | `ADMIN` | Resume trading (reason mandatory, audited) |
 | `/metrics` | `GET` | — (public) | Uptime and heap memory statistics |
