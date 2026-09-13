@@ -4,6 +4,7 @@ import { Divider } from '../../components/ui/divider/index.js';
 import { Stepper, type Step } from '../../components/ui/stepper/index.js';
 import { Badge } from '../../components/ui/badge/index.js';
 import { getKernel } from '../../kernel.js';
+import { fmtPrice } from '../KernelDashboard.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
 import type { TrackedOrder } from '../../engines/execution-engine.js';
 
@@ -38,7 +39,7 @@ const OrdersTable = (p: {
         : '0.0 bps';
       return (
         <Text key={o.intentId} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-          {isSel ? ' >' : '  '} {o.intentId.padEnd(11)} {o.pair.padEnd(12)} <Text color={isSel ? 'black' : o.side === 'buy' ? 'green' : 'red'}>{o.side.toUpperCase().padEnd(5)}</Text> {o.quantity.toFixed(3).padEnd(7)} {(o.expectedPrice ?? 0).toFixed(1).padEnd(10)} {(o.avgFillPrice ?? 0).toFixed(1).padEnd(11)} {slip.padEnd(9)} <Text color={isSel ? 'black' : stColor}>{o.status}</Text>
+          {isSel ? ' >' : '  '} {o.intentId.padEnd(11)} {o.pair.padEnd(12)} <Text color={isSel ? 'black' : o.side === 'buy' ? 'green' : 'red'}>{o.side.toUpperCase().padEnd(5)}</Text> {o.quantity.toFixed(3).padEnd(7)} {fmtPrice(o.expectedPrice ?? 0, o.pair).padEnd(10)} {fmtPrice(o.avgFillPrice ?? 0, o.pair).padEnd(11)} {slip.padEnd(9)} <Text color={isSel ? 'black' : stColor}>{o.status}</Text>
         </Text>
       );
     })}

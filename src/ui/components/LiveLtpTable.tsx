@@ -66,16 +66,17 @@ export type LtpTableRow = {
   status: string;
 };
 
-const moneyCell = (n?: number): string => (n !== undefined ? `$${fmtPrice(n)}` : '—');
+const moneyCell = (n?: number, symbol?: string): string =>
+  (n !== undefined && Number.isFinite(n) ? `$${fmtPrice(n, symbol)}` : '—');
 
 export const toLtpTableRow = (symbol: string, quote: LtpQuote, isAnchor: boolean): LtpTableRow => {
   const status = isAnchor ? 'ANCHOR' : quote.live ? 'LIVE' : quote.ltp !== undefined ? 'STALE' : 'WAIT';
   return {
     symbol,
-    ltp: moneyCell(quote.ltp),
-    bid: moneyCell(quote.bid),
-    ask: moneyCell(quote.ask),
-    mark: moneyCell(quote.mark),
+    ltp: moneyCell(quote.ltp, symbol),
+    bid: moneyCell(quote.bid, symbol),
+    ask: moneyCell(quote.ask, symbol),
+    mark: moneyCell(quote.mark, symbol),
     status,
   };
 };

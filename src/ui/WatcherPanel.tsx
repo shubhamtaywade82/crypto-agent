@@ -5,6 +5,8 @@ import type { MarketTicker, WatcherStatus, WatchTriggerEvent } from '../types.js
 import { getKernel } from '../kernel.js';
 import type { BrokerPosition } from '../infrastructure/broker/broker.js';
 
+import { fmtPrice } from './KernelDashboard.js';
+
 interface TriggerLog { readonly symbol: string; readonly price: number; readonly time: string; }
 
 const formatTriggerTime = (ts: number): string =>
@@ -17,11 +19,8 @@ const formatDistance = (current: number, target: number): string => {
   return `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
 };
 
-const formatMarketPrice = (sym: string, p: number | undefined): string => {
-  if (p === undefined) return '...';
-  if (sym === 'XRPUSDT') return `$${p.toFixed(4)}`;
-  return `$${p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
+const formatMarketPrice = (sym: string, p: number | undefined): string =>
+  p !== undefined ? `$${fmtPrice(p, sym)}` : '...';
 
 interface WatcherData {
   readonly statuses: WatcherStatus[];
@@ -105,7 +104,7 @@ const PositionsBar = ({ positions }: { positions: readonly BrokerPosition[] }): 
           <Text key={key} color="gray" wrap="truncate">
             {p.side === 'long' ? '🟢' : '🔴'} <Text bold color="white">{p.pair}</Text>{' '}
             <Text color={p.side === 'long' ? 'green' : 'red'}>{p.side.toUpperCase()} {p.size}</Text>{' '}
-            @ <Text color="white">${p.entryPrice.toFixed(2)}</Text>{' '}
+            @ <Text color="white">${fmtPrice(p.entryPrice, p.pair)}</Text>{' '}
             │ PnL: <Text bold color={isProfit ? 'green' : 'red'}>
               {isProfit ? '+' : ''}${upnl.toFixed(2)} ({isProfit ? '+' : ''}{pnlPct.toFixed(2)}%)
             </Text>
@@ -124,7 +123,7 @@ const WatchList = ({ statuses }: { statuses: WatcherStatus[] }): React.JSX.Eleme
         <React.Fragment key={w.id}>
           {idx > 0 ? ' │ ' : ''}
           {directionIcon(w.type)} <Text color="cyan">{w.symbol.replace('USDT', '')}</Text>{' '}
-          <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${w.targetPrice}</Text>
+          <Text color="yellow">{w.type === 'price_above' ? '>' : '<'}${fmtPrice(w.targetPrice, w.symbol)}</Text>
           {w.currentPrice !== undefined ? (
             <Text color="gray"> ({formatDistance(w.currentPrice, w.targetPrice)})</Text>
           ) : null}
@@ -141,7 +140,7 @@ const TriggerList = ({ triggers }: { triggers: TriggerLog[] }): React.JSX.Elemen
     {triggers.slice(0, 3).map((t, i) => (
       <React.Fragment key={`trig-${i}`}>
         {i > 0 ? ' │ ' : ''}
-        ⚡ {t.symbol.replace('USDT', '')} @ ${t.price} [{t.time}]
+        ⚡ {t.symbol.replace('USDT', '')} @ ${fmtPrice(t.price, t.symbol)} [{t.time}]
       </React.Fragment>
     ))}
   </Text>

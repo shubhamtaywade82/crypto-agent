@@ -107,3 +107,40 @@ describe('fitCols and dividerLine', () => {
     expect(line.startsWith('──')).toBe(true);
   });
 });
+
+describe('formatPrecision and fmtPrice precision retention', () => {
+  it('maintains explicit decimal precision for numeric inputs even when integer', async () => {
+    const { formatPrecision } = await import('../src/domain/primitives.js');
+    expect(formatPrecision(6, 1)).toBe('6.0');
+    expect(formatPrecision(6, 2)).toBe('6.00');
+    expect(formatPrecision(6, 3)).toBe('6.000');
+    expect(formatPrecision(6, 4)).toBe('6.0000');
+  });
+
+  it('preserves decimals from string representation', async () => {
+    const { formatPrecision } = await import('../src/domain/primitives.js');
+    expect(formatPrecision('6.0')).toBe('6.0');
+    expect(formatPrecision('6.000')).toBe('6.000');
+    expect(formatPrecision('0.00')).toBe('0.00');
+    expect(formatPrecision('0.0000')).toBe('0.0000');
+  });
+
+  it('formats by symbol tick precision without dropping decimals', async () => {
+    const { fmtPrice } = await import('../src/ui/KernelDashboard.js');
+    expect(fmtPrice(6, 'BTCUSDT')).toBe('6.0');
+    expect(fmtPrice(6, 'SOLUSDT')).toBe('6.00');
+    expect(fmtPrice(6, 'NEARUSDT')).toBe('6.000');
+    expect(fmtPrice(6, 'XRPUSDT')).toBe('6.0000');
+    expect(fmtPrice(77130, 'BTCUSDT')).toBe('77,130.0');
+    expect(fmtPrice(101.2, 'SOLUSDT')).toBe('101.20');
+    expect(fmtPrice(0.5, 'XRPUSDT')).toBe('0.5000');
+  });
+
+  it('keeps symbol precision in toLtpTableRow cells', () => {
+    const row = toLtpTableRow('XRPUSDT', quote({ ltp: 0.5, bid: 0.49, ask: 0.51, mark: 0.5, live: true }), false);
+    expect(row.ltp).toBe('$0.5000');
+    expect(row.bid).toBe('$0.4900');
+    expect(row.ask).toBe('$0.5100');
+    expect(row.mark).toBe('$0.5000');
+  });
+});

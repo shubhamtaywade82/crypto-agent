@@ -5,6 +5,7 @@ import { KeyHint, type KeyHintItem } from '../../components/ui/key-hint/index.js
 import { Badge } from '../../components/ui/badge/index.js';
 import type { BrokerPosition } from '../../infrastructure/broker/broker.js';
 import { getKernel } from '../../kernel.js';
+import { fmtPrice } from '../KernelDashboard.js';
 
 export interface PositionsViewProps {
   readonly positions: readonly BrokerPosition[];
@@ -35,10 +36,10 @@ const PositionDetail = ({ p }: { readonly p: BrokerPosition }): React.JSX.Elemen
       <Badge variant={p.side === 'long' ? 'success' : 'error'}>{p.side.toUpperCase()}</Badge>
     </Box>
     <Text color="gray">├─ Strategy:     <Text color="white">{ledger?.strategyId ?? '—'}</Text></Text>
-    <Text color="gray">├─ Entry Price:  <Text color="white">{p.entryPrice.toFixed(2)} USDT</Text></Text>
+    <Text color="gray">├─ Entry Price:  <Text color="white">{fmtPrice(p.entryPrice, p.pair)} USDT</Text></Text>
     <Text color="gray">├─ Leverage:     <Text color="white">{p.leverage ?? ledger?.leverage ?? 2}x</Text></Text>
-    <Text color="gray">├─ Stop Loss:    <Text color="white">{ledger ? ledger.stopLoss.toFixed(2) : '—'} USDT</Text></Text>
-    <Text color="gray">├─ Take Profit:  <Text color="white">{ledger ? ledger.takeProfit.toFixed(2) : '—'} USDT</Text></Text>
+    <Text color="gray">├─ Stop Loss:    <Text color="white">{ledger ? `${fmtPrice(ledger.stopLoss, p.pair)} USDT` : '—'}</Text></Text>
+    <Text color="gray">├─ Take Profit:  <Text color="white">{ledger ? `${fmtPrice(ledger.takeProfit, p.pair)} USDT` : '—'}</Text></Text>
     <Text color="gray">└─ Planned R:R:  <Text color="white">{ledger ? ledger.plannedRr.toFixed(2) : '—'} · regime {ledger?.regime ?? '—'}</Text></Text>
     <Box marginTop={1}>
       <KeyHint keys={[...POSITION_KEYS]} />
@@ -61,7 +62,7 @@ const PositionsTable = (p: {
       const pct = pos.entryPrice > 0 ? (upnl / (pos.entryPrice * pos.size)) * 100 : 0;
       return (
         <Text key={pos.pair} color={isSel ? 'black' : undefined} backgroundColor={isSel ? 'cyan' : undefined}>
-          {isSel ? ' >' : '  '} {pos.pair.padEnd(10)} <Text color={isSel ? 'black' : pos.side === 'long' ? 'green' : 'red'}>{pos.side.toUpperCase().padEnd(6)}</Text> {pos.size.toFixed(3).padEnd(10)} {pos.entryPrice.toFixed(2).padEnd(10)} {(pos.markPrice ?? pos.entryPrice).toFixed(2).padEnd(10)} <Text color={isSel ? 'black' : pnlColor}>{(sign + '$' + upnl.toFixed(2)).padEnd(12)}</Text> <Text color={isSel ? 'black' : pnlColor}>{(sign + pct.toFixed(2) + '%').padEnd(8)}</Text> <Text color={isSel ? 'black' : 'green'}>PROTECTED</Text>
+          {isSel ? ' >' : '  '} {pos.pair.padEnd(10)} <Text color={isSel ? 'black' : pos.side === 'long' ? 'green' : 'red'}>{pos.side.toUpperCase().padEnd(6)}</Text> {pos.size.toFixed(3).padEnd(10)} {fmtPrice(pos.entryPrice, pos.pair).padEnd(10)} {fmtPrice(pos.markPrice ?? pos.entryPrice, pos.pair).padEnd(10)} <Text color={isSel ? 'black' : pnlColor}>{(sign + '$' + upnl.toFixed(2)).padEnd(12)}</Text> <Text color={isSel ? 'black' : pnlColor}>{(sign + pct.toFixed(2) + '%').padEnd(8)}</Text> <Text color={isSel ? 'black' : 'green'}>PROTECTED</Text>
         </Text>
       );
     })}

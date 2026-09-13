@@ -45,7 +45,7 @@ export const toMarketTableRow = (
   live: LtpQuote
 ): MarketTableRow => {
   const px = live.ltp ?? m.price;
-  const priceStr = px > 0 ? `$${fmtPrice(px)}` : '—';
+  const priceStr = px > 0 ? `$${fmtPrice(px, m.symbol)}` : '—';
   const row: MarketTableRow = {
     n: String(idx + 1),
     symbol: compact ? shortSym(m.symbol, 6) : m.symbol,
@@ -187,7 +187,7 @@ export const OpportunityDetail = (p: { readonly row: ScanOpportunity }): React.J
 export const MarketDetail = (p: { readonly market: MonitoredMarket }): React.JSX.Element => (
   <Box flexDirection="column">
     <Text bold color="yellow">MONITORED: {p.market.symbol}</Text>
-    <Text color="gray">Mark Price: <Text color="white">${p.market.price.toFixed(2)}</Text></Text>
+    <Text color="gray">Mark Price: <Text color="white">${fmtPrice(p.market.price, p.market.symbol)}</Text></Text>
     <Text color="gray">Regime: <Text color="white">{p.market.regime}</Text></Text>
     <Text color="gray">1H Trend: <Text color="white">{p.market.trend}</Text></Text>
     <Text color="gray">Setups: <Text color="white">{p.market.setupsCount} setups passed risk gate (min 2.5 R:R)</Text></Text>

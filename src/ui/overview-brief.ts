@@ -3,6 +3,7 @@ import { deriveCircuitState } from '../domain/risk/risk-config.js';
 import type { PipelineTrace } from '../engines/pipeline.js';
 import type { ScanOpportunity } from './scan-opportunities.js';
 import { mtfTrendLine, pipelineAge, topSetup, traceForSymbol, type PipelineSnapshots } from './pipeline-view.js';
+import { fmtPrice } from './KernelDashboard.js';
 
 export type TraderStance = 'LONG' | 'SHORT' | 'WAIT' | 'AVOID' | 'MONITOR';
 
@@ -51,7 +52,7 @@ const triggerLine = (trace: PipelineTrace, price: number): string | null => {
   const dist = ((setup.entry - price) / price) * 100;
   const side = setup.direction === 'LONG' ? 'bid' : 'offer';
   const distLabel = Math.abs(dist) < 0.05 ? 'at market' : `${dist > 0 ? '+' : ''}${dist.toFixed(2)}% from mark`;
-  return `${setup.orderType} ${setup.direction} near $${setup.entry.toFixed(2)} (${distLabel}) — ${side} liquidity preferred`;
+  return `${setup.orderType} ${setup.direction} near $${fmtPrice(setup.entry, trace.symbol)} (${distLabel}) — ${side} liquidity preferred`;
 };
 
 const microConflict = (trace: PipelineTrace): string | null => {

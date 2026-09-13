@@ -5,6 +5,9 @@ import type { BookLevel, MicrostructureView, TradePrint } from '../domain/market
 import { ensureSymbolTracked } from '../engines/market-hydrate.js';
 import { LiveTape } from './components/LiveTape.js';
 
+import type { Decimal } from 'decimal.js';
+import { formatPrecision } from '../domain/primitives.js';
+
 export interface ActivityEntry {
   readonly id: string;
   readonly at: string;
@@ -16,8 +19,10 @@ const W_QTY = 9;
 const W_VOL = 8;
 const W_PX = 11;
 
-export const fmtPrice = (p: number): string =>
-  p.toLocaleString('en-US', { maximumFractionDigits: 4 });
+export const fmtPrice = (
+  p: number | string | Decimal,
+  precisionOrSymbol?: number | string
+): string => formatPrecision(p, precisionOrSymbol);
 
 export const fmtVol = (notional: number): string => {
   if (notional >= 1_000_000) return `$${(notional / 1_000_000).toFixed(2)}M`;
@@ -31,7 +36,7 @@ const bookNotional = (levels: readonly BookLevel[]): number =>
 
 const fmtQtyCol = (q: number): string => q.toFixed(3).padStart(W_QTY);
 const fmtVolCol = (v: number): string => fmtVol(v).padStart(W_VOL);
-const fmtPxCol = (p: number): string => fmtPrice(p).padStart(W_PX);
+const fmtPxCol = (p: number, sym?: string): string => fmtPrice(p, sym).padStart(W_PX);
 const leftPad = W_QTY + 1 + W_VOL + 1 + W_PX;
 
 export const quotePrice = (q: {
@@ -45,8 +50,8 @@ export const quotePrice = (q: {
   return undefined;
 };
 
-const pxLabel = (label: string, value: number | undefined): string =>
-  value !== undefined ? `${label} ${fmtPrice(value)}` : `${label} —`;
+const pxLabel = (label: string, value: number | undefined, sym?: string): string =>
+  value !== undefined ? `${label} ${fmtPrice(value, sym)}` : `${label} —`;
 
 const bookTone = (imbPct: number): string => {
   if (imbPct > 12) return 'Bid-heavy book — resting size below';
@@ -69,27 +74,29 @@ const flowNote = (bias: MicrostructureView['flowBias']): string => {
 const wallNote = (
   micro: MicrostructureView,
   bids: readonly BookLevel[],
-  asks: readonly BookLevel[]
+  asks: readonly BookLevel[],
+  sym?: string
 ): string => {
   const bestBid = bids[0]?.price;
   const bestAsk = asks[0]?.price;
   if (!bestBid || !bestAsk) return 'no dominant wall at touch';
-  if (micro.bidDepth > micro.askDepth * 1.35) return `support near ${fmtPrice(bestBid)}`;
-  if (micro.askDepth > micro.bidDepth * 1.35) return `resistance near ${fmtPrice(bestAsk)}`;
+  if (micro.bidDepth > micro.askDepth * 1.35) return `support near ${fmtPrice(bestBid, sym)}`;
+  if (micro.askDepth > micro.bidDepth * 1.35) return `resistance near ${fmtPrice(bestAsk, sym)}`;
   return 'no dominant wall at touch';
 };
 
 const depthCommentary = (
   micro: MicrostructureView | undefined,
   bids: readonly BookLevel[],
-  asks: readonly BookLevel[]
+  asks: readonly BookLevel[],
+  sym?: string
 ): string => {
   if (!micro) return 'Awaiting aggregate depth…';
   return [
     bookTone(micro.imbalance * 100),
     spreadNote(micro.spreadBps),
     flowNote(micro.flowBias),
-    wallNote(micro, bids, asks),
+    wallNote(micro, bids, asks, sym),
   ].join('; ');
 };
 
@@ -97,12 +104,13 @@ const DepthHeader = (p: {
   readonly last?: number;
   readonly mark?: number;
   readonly micro?: MicrostructureView;
+  readonly symbol?: string;
 }): React.JSX.Element => (
   <Box justifyContent="center" marginBottom={1}>
     <Text>
-      <Text bold color="white">{pxLabel('LTP', p.last)}</Text>
+      <Text bold color="white">{pxLabel('LTP', p.last, p.symbol)}</Text>
       <Text color="gray"> │ </Text>
-      <Text bold color="cyan">{pxLabel('MARK', p.mark)}</Text>
+      <Text bold color="cyan">{pxLabel('MARK', p.mark, p.symbol)}</Text>
       {p.micro ? (
         <>
           <Text color="gray"> │ </Text>
@@ -117,6 +125,7 @@ const DepthAggregate = (p: {
   readonly micro: MicrostructureView;
   readonly bids: readonly BookLevel[];
   readonly asks: readonly BookLevel[];
+  readonly symbol?: string;
 }): React.JSX.Element => {
   const bidVol = bookNotional(p.bids);
   const askVol = bookNotional(p.asks);
@@ -125,7 +134,7 @@ const DepthAggregate = (p: {
       <Text color="gray">
         Book bid {p.micro.bidDepth.toFixed(1)} ({fmtVol(bidVol)}) │ ask {p.micro.askDepth.toFixed(1)} ({fmtVol(askVol)}) │ imb {(p.micro.imbalance * 100).toFixed(0)}% │ tape {fmtVol(p.micro.buyVolume)} / {fmtVol(p.micro.sellVolume)} │ Δ {fmtVol(p.micro.tradeDelta)}
       </Text>
-      <Text color="gray" italic wrap="truncate">{depthCommentary(p.micro, p.bids, p.asks)}</Text>
+      <Text color="gray" italic wrap="truncate">{depthCommentary(p.micro, p.bids, p.asks, p.symbol)}</Text>
     </Box>
   );
 };
@@ -136,18 +145,20 @@ export interface DepthLadderProps {
   readonly last?: number;
   readonly mark?: number;
   readonly micro?: MicrostructureView;
+  readonly symbol?: string;
 }
 
-const DepthLevelRow = ({ bid, ask, sep }: {
+const DepthLevelRow = ({ bid, ask, sep, symbol }: {
   readonly bid?: BookLevel;
   readonly ask?: BookLevel;
   readonly sep: string;
+  readonly symbol?: string;
 }): React.JSX.Element => {
   const left = bid
-    ? `${fmtQtyCol(bid.qty)} ${fmtVolCol(levelNotional(bid))} ${fmtPxCol(bid.price)}`
+    ? `${fmtQtyCol(bid.qty)} ${fmtVolCol(levelNotional(bid))} ${fmtPxCol(bid.price, symbol)}`
     : `${' '.repeat(leftPad)}`;
   const right = ask
-    ? `${fmtPxCol(ask.price)} ${fmtVolCol(levelNotional(ask))} ${fmtQtyCol(ask.qty)}`
+    ? `${fmtPxCol(ask.price, symbol)} ${fmtVolCol(levelNotional(ask))} ${fmtQtyCol(ask.qty)}`
     : '';
   return (
     <Text>
@@ -158,7 +169,7 @@ const DepthLevelRow = ({ bid, ask, sep }: {
   );
 };
 
-export const DepthLadder = ({ bids, asks, last, mark, micro }: DepthLadderProps): React.JSX.Element => {
+export const DepthLadder = ({ bids, asks, last, mark, micro, symbol }: DepthLadderProps): React.JSX.Element => {
   const topBids = bids.slice(0, DEPTH_LEVELS);
   const topAsks = asks.slice(0, DEPTH_LEVELS);
   const mid = topBids[0] && topAsks[0] ? (topBids[0].price + topAsks[0].price) / 2 : undefined;
@@ -169,16 +180,16 @@ export const DepthLadder = ({ bids, asks, last, mark, micro }: DepthLadderProps)
 
   return (
     <Box flexDirection="column">
-      <DepthHeader last={effectiveLast} mark={effectiveMark} micro={micro} />
+      <DepthHeader last={effectiveLast} mark={effectiveMark} micro={micro} symbol={symbol} />
       <Text color="gray">
         <Text color="green">{`${'qty'.padStart(W_QTY)} ${'vol'.padStart(W_VOL)} ${'price'.padStart(W_PX)}`}</Text>
         {sep}
         <Text color="red">{`${'price'.padStart(W_PX)} ${'vol'.padStart(W_VOL)} ${'qty'.padStart(W_QTY)}`}</Text>
       </Text>
       {Array.from({ length: rows }, (_, i) => (
-        <DepthLevelRow key={`row-${i}`} bid={topBids[i]} ask={topAsks[i]} sep={sep} />
+        <DepthLevelRow key={`row-${i}`} bid={topBids[i]} ask={topAsks[i]} sep={sep} symbol={symbol} />
       ))}
-      {micro ? <DepthAggregate micro={micro} bids={bids} asks={asks} /> : null}
+      {micro ? <DepthAggregate micro={micro} bids={bids} asks={asks} symbol={symbol} /> : null}
     </Box>
   );
 };
@@ -206,7 +217,7 @@ export const SymbolRows = ({ symbols }: { symbols: readonly string[] }): React.J
         const stale = q ? kernel.marketStore.stalenessMs(sym) : undefined;
         return (
           <Text key={sym} wrap="truncate">
-            <Text bold>{sym.replace('USDT', '')}</Text> {px !== undefined ? fmtPrice(px) : '…'}
+            <Text bold>{sym.replace('USDT', '')}</Text> {px !== undefined ? fmtPrice(px, sym) : '…'}
             {m ? <Text color="gray"> spr {m.spreadBps.toFixed(1)}bps imb {(m.imbalance * 100).toFixed(0)}% {m.flowBias}</Text>
               : <Text color="gray"> {book ? 'awaiting depth' : 'not subscribed'}</Text>}
             {stale !== undefined && stale > 30_000 ? <Text color="red"> STALE</Text> : null}
@@ -244,7 +255,7 @@ export const KernelDashboard = ({
         <Box width="50%" flexDirection="column" paddingRight={1}>
           <Text bold color="yellow">Depth</Text>
           {focus?.bids.length ? (
-            <DepthLadder bids={focus.bids} asks={focus.asks} last={focus.last} mark={focus.mark} micro={focus.microstructure} />
+            <DepthLadder bids={focus.bids} asks={focus.asks} last={focus.last} mark={focus.mark} micro={focus.microstructure} symbol={focusSymbol} />
           ) : <Text color="gray">depth unavailable</Text>}
         </Box>
         <Box width="50%" flexDirection="column">

@@ -15,6 +15,73 @@ export const num = (value: Decimal | number): number =>
 export const fmt = (value: Decimal | number, dp = 8): string =>
   (value instanceof Decimal ? value : dec(value)).toDecimalPlaces(dp, Decimal.ROUND_DOWN).toFixed(dp);
 
+/** Known exchange price precision (number of decimal places) by symbol. */
+export const SYMBOL_PRECISION: Readonly<Record<string, number>> = {
+  BTCUSDT: 1,
+  ETHUSDT: 2,
+  SOLUSDT: 2,
+  BNBUSDT: 2,
+  AVAXUSDT: 2,
+  LINKUSDT: 3,
+  DOTUSDT: 3,
+  NEARUSDT: 3,
+  XRPUSDT: 4,
+  ADAUSDT: 4,
+  DOGEUSDT: 4,
+  SUIUSDT: 4,
+  PEPEUSDT: 7,
+  SHIBUSDT: 8,
+};
+
+/**
+ * Resolve display precision for a price or numerical value.
+ * Preserves exact precision (e.g. 0.0, 0.00, 0.000, 0.0000) rather than dropping zeros.
+ */
+export const resolvePrecision = (
+  value: Decimal | number | string,
+  precisionOrSymbol?: number | string
+): number => {
+  if (typeof precisionOrSymbol === 'number' && Number.isFinite(precisionOrSymbol)) {
+    return Math.min(20, Math.max(0, Math.floor(precisionOrSymbol)));
+  }
+  if (typeof precisionOrSymbol === 'string' && precisionOrSymbol.length > 0) {
+    const key = precisionOrSymbol.toUpperCase().replace(/^B-/, '').replace('_', '');
+    const symKey = key.endsWith('USDT') ? key : `${key}USDT`;
+    const known = SYMBOL_PRECISION[symKey] ?? SYMBOL_PRECISION[key];
+    if (known !== undefined) return known;
+  }
+  if (typeof value === 'string' && value.includes('.')) {
+    return Math.min(20, value.split('.')[1]?.length ?? 2);
+  }
+  if (value instanceof Decimal) {
+    return Math.min(20, Math.max(2, value.decimalPlaces()));
+  }
+  const n = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(n)) {
+    const s = n.toString();
+    if (s.includes('.')) return Math.min(20, Math.max(2, s.split('.')[1]?.length ?? 2));
+    if (Math.abs(n) >= 1) return 2;
+    if (Math.abs(n) >= 0.1) return 3;
+    if (Math.abs(n) >= 0.01) return 4;
+    return 6;
+  }
+  return 2;
+};
+
+/**
+ * Format a price or value maintaining exact decimal precision (never strip trailing zeros).
+ * Keeps thousands grouping with fixed decimal places (e.g. 6 -> "6.0", "6.00", "6.000").
+ */
+export const formatPrecision = (
+  value: Decimal | number | string,
+  precisionOrSymbol?: number | string
+): string => {
+  const n = typeof value === 'number' ? value : value instanceof Decimal ? value.toNumber() : Number(value);
+  if (!Number.isFinite(n)) return '—';
+  const dp = resolvePrecision(value, precisionOrSymbol);
+  return n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+};
+
 /** Floor a value down to the exchange step size (lot size / tick size). */
 export const floorToStep = (value: Decimal, step: Decimal): Decimal => {
   if (step.lte(0)) return value;

@@ -4,6 +4,8 @@ import { Badge, type BadgeVariant } from '../../components/ui/badge/index.js';
 import { Spinner } from '../../components/ui/spinner/index.js';
 import type { TraderBrief, TraderStance } from '../overview-brief.js';
 
+import { fmtPrice } from '../KernelDashboard.js';
+
 const stanceVariant = (s: TraderStance): BadgeVariant => {
   if (s === 'LONG') return 'success';
   if (s === 'SHORT') return 'error';
@@ -12,13 +14,16 @@ const stanceVariant = (s: TraderStance): BadgeVariant => {
   return 'info';
 };
 
-const LevelsRow = ({ levels }: { readonly levels: TraderBrief['levels'] }): React.JSX.Element | null => {
+const LevelsRow = ({ levels, symbol }: {
+  readonly levels: TraderBrief['levels'];
+  readonly symbol: string;
+}): React.JSX.Element | null => {
   const parts: string[] = [];
-  if (levels.support !== undefined) parts.push(`S $${levels.support.toFixed(0)}`);
-  if (levels.resistance !== undefined) parts.push(`R $${levels.resistance.toFixed(0)}`);
-  if (levels.entry !== undefined) parts.push(`E $${levels.entry.toFixed(2)}`);
-  if (levels.stop !== undefined) parts.push(`SL $${levels.stop.toFixed(2)}`);
-  if (levels.target !== undefined) parts.push(`TP $${levels.target.toFixed(2)}`);
+  if (levels.support !== undefined) parts.push(`S $${fmtPrice(levels.support, symbol)}`);
+  if (levels.resistance !== undefined) parts.push(`R $${fmtPrice(levels.resistance, symbol)}`);
+  if (levels.entry !== undefined) parts.push(`E $${fmtPrice(levels.entry, symbol)}`);
+  if (levels.stop !== undefined) parts.push(`SL $${fmtPrice(levels.stop, symbol)}`);
+  if (levels.target !== undefined) parts.push(`TP $${fmtPrice(levels.target, symbol)}`);
   if (levels.rr !== undefined) parts.push(`RR ${levels.rr.toFixed(2)}`);
   if (parts.length === 0) return null;
   return <Text color="gray" wrap="truncate">  Levels: <Text color="white">{parts.join(' │ ')}</Text></Text>;
@@ -46,7 +51,7 @@ const BriefNotes = ({ brief }: { readonly brief: TraderBrief }): React.JSX.Eleme
     {brief.thesis ? <Text color="gray" wrap="truncate">  Thesis: <Text color="white">"{brief.thesis.slice(0, 120)}{brief.thesis.length > 120 ? '…' : ''}"</Text></Text> : null}
     {brief.trigger ? <Text color="gray" wrap="truncate">  Trigger: <Text color="green">{brief.trigger}</Text></Text> : null}
     {brief.invalidation ? <Text color="gray" wrap="truncate">  Invalidate: <Text color="red">{brief.invalidation}</Text></Text> : null}
-    <LevelsRow levels={brief.levels} />
+    <LevelsRow levels={brief.levels} symbol={brief.symbol} />
     <Text color="gray" wrap="truncate">  Risk: <Text color={brief.riskOk ? 'green' : 'red'}>{brief.riskNote}</Text></Text>
     {brief.microNote ? <Text color="yellow" wrap="truncate">  ⚠ {brief.microNote}</Text> : null}
     {brief.alternate ? (
