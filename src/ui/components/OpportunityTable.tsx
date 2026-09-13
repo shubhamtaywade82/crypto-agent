@@ -65,9 +65,9 @@ export const toOpportunityTableRow = (
   const base: OpportunityTableRow = {
     n: String(idx + 1),
     symbol: compact ? shortSym(c.symbol, 5) : c.symbol,
-    setup: c.setup,
+    setup: compact ? c.setup.slice(0, 10) : c.setup,
     rr: c.rr.toFixed(1),
-    state: c.state,
+    state: compact ? c.state.slice(0, 7) : c.state,
   };
   if (compact) return base;
   return { ...base, direction: c.direction, tf: c.tf, conf: c.confidence.toFixed(2), regime: c.regime };
@@ -127,6 +127,7 @@ const MonitoredMarketsTable = (p: {
         columns={p.compact ? MARKET_COMPACT : MARKET_FULL}
         framed={!p.compact}
         highlightedIndex={safeIdx < 0 ? undefined : safeIdx}
+        maxWidth={p.compact ? 34 : undefined}
       />
       {p.isScanning ? (
         <Spinner label="Scanning markets..." type="dots" />
@@ -168,6 +169,7 @@ export const OpportunityTable = (p: OpportunityTableProps): React.JSX.Element =>
       columns={p.compact ? OPP_COMPACT : OPP_FULL}
       framed={!p.compact}
       highlightedIndex={safeIdx < 0 ? undefined : safeIdx}
+      maxWidth={p.compact ? 34 : undefined}
     />
   );
 };

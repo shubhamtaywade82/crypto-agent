@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { borderStyles, darkTheme } from '../_core.js';
 import type { BorderStyle, InkUITheme } from '../_core.js';
+import { fitCols } from '../divider/index.js';
 
 export interface TableColumn<T extends Record<string, unknown> = Record<string, unknown>> {
   /** Key into each data row */
@@ -25,6 +26,8 @@ export interface TableProps<T extends Record<string, unknown> = Record<string, u
   highlightedIndex?: number;
   /** When false, skip box-drawing chrome (compact sidebars) */
   framed?: boolean;
+  /** Cap used width (sidebar tables) */
+  maxWidth?: number;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -58,31 +61,24 @@ function resolveWidths<T extends Record<string, unknown>>(
   columns: TableColumn<T>[],
   data: T[],
   termWidth: number,
+  framed: boolean,
 ): number[] {
-  // Natural width = max of header and all cell values (inner, no padding)
   const natural = columns.map((col) => {
     if (col.width !== undefined) return col.width;
     const headerLen = col.header.length;
-    const maxCell   = data.reduce((max, row) => {
-      return Math.max(max, cellStr(row[col.key]).length);
-    }, 0);
+    const maxCell = data.reduce((max, row) => Math.max(max, cellStr(row[col.key]).length), 0);
     return Math.max(headerLen, maxCell);
   });
 
-  // Each column occupies: 1 space + content + 1 space + 1 border = width + 3
-  // Plus the leading border char: total = 1 + sum(w + 3)
-  const overhead = 1 + columns.length * 3; // leading │ + (space + content + space + │) per col
+  const overhead = framed ? 1 + columns.length * 3 : columns.length;
   const totalNatural = natural.reduce((s, w) => s + w, 0) + overhead;
-
   if (totalNatural <= termWidth) return natural;
 
-  // Distribute available space proportionally among non-fixed columns
-  const fixedTotal   = columns.reduce((s, col, i) =>
+  const fixedTotal = columns.reduce((s, col, i) =>
     col.width !== undefined ? s + natural[i]! : s, 0);
-  const fixedOverhead = overhead;
-  const available    = Math.max(termWidth - fixedOverhead - fixedTotal, columns.length * 3);
-  const flexCount    = columns.filter((c) => c.width === undefined).length;
-  const flexBudget   = Math.floor(available / Math.max(flexCount, 1));
+  const available = Math.max(termWidth - overhead - fixedTotal, columns.length * 2);
+  const flexCount = columns.filter((c) => c.width === undefined).length;
+  const flexBudget = Math.floor(available / Math.max(flexCount, 1));
 
   return columns.map((col, i) =>
     col.width !== undefined ? natural[i]! : Math.max(3, flexBudget),
@@ -157,24 +153,24 @@ const Row: React.FC<RowProps> = ({
 
 export function Table<T extends Record<string, unknown> = Record<string, unknown>>({
   columns, data, borderStyle = 'single', theme = darkTheme,
-  highlightedIndex, framed = true,
+  highlightedIndex, framed = true, maxWidth,
 }: TableProps<T>) {
   const { stdout } = useStdout();
-  const termWidth = stdout?.columns ?? 80;
+  const termWidth = fitCols(stdout?.columns ?? 80, maxWidth);
   const b = borderStyles[borderStyle];
-  const widths = resolveWidths(columns, data, termWidth);
+  const widths = resolveWidths(columns, data, termWidth, framed);
   const aligns = columns.map((c) => c.align ?? 'left');
   const borderColor = theme.colors.border;
   const rowBase = { widths, aligns, borderChar: b.left, borderColor, framed };
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0} overflow="hidden" width={termWidth}>
       {framed ? (
-        <Text color={borderColor}>{buildBorderLine(b.topLeft, b.top, b.topT, b.topRight, widths)}</Text>
+        <Text wrap="truncate" color={borderColor}>{buildBorderLine(b.topLeft, b.top, b.topT, b.topRight, widths)}</Text>
       ) : null}
       <Row {...rowBase} cells={columns.map((c) => c.header)} textColor={theme.colors.primary} bold />
       {framed ? (
-        <Text color={borderColor}>{buildBorderLine(b.leftT, b.top, b.cross, b.rightT, widths)}</Text>
+        <Text wrap="truncate" color={borderColor}>{buildBorderLine(b.leftT, b.top, b.cross, b.rightT, widths)}</Text>
       ) : null}
       {data.map((row, ri) => (
         <Row
@@ -186,7 +182,7 @@ export function Table<T extends Record<string, unknown> = Record<string, unknown
         />
       ))}
       {framed ? (
-        <Text color={borderColor}>{buildBorderLine(b.bottomLeft, b.top, b.bottomT, b.bottomRight, widths)}</Text>
+        <Text wrap="truncate" color={borderColor}>{buildBorderLine(b.bottomLeft, b.top, b.bottomT, b.bottomRight, widths)}</Text>
       ) : null}
     </Box>
   );

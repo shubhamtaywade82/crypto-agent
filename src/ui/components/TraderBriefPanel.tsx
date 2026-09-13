@@ -31,14 +31,14 @@ const regimeVariant = (regime: string): BadgeVariant => {
 };
 
 const BriefRegimeRow = ({ brief, conf }: { readonly brief: TraderBrief; readonly conf: string }): React.JSX.Element => (
-  <Box gap={1} alignItems="center">
-    <Text color="gray">Regime</Text>
+  <Text wrap="truncate">
+    <Text color="gray">Regime </Text>
     <Badge variant={regimeVariant(brief.regime)}>{brief.regime}</Badge>
-    <Text color="gray">│ MTF <Text color="white">{brief.mtf}</Text>
+    <Text color="gray"> │ MTF <Text color="white">{brief.mtf}</Text>
       {brief.setup ? <> │ Setup <Text color="yellow">{brief.setup}</Text></> : null}
       {' │ '}Conf <Text color="white">{conf}</Text>
     </Text>
-  </Box>
+  </Text>
 );
 
 const BriefNotes = ({ brief }: { readonly brief: TraderBrief }): React.JSX.Element => (
@@ -65,16 +65,18 @@ export const TraderBriefPanel = ({ brief }: { readonly brief: TraderBrief }): Re
 
   return (
     <Box flexDirection="column" gap={0}>
-      <Box justifyContent="space-between">
-        <Text bold color="cyan">TRADER BRIEF — {brief.symbol}</Text>
-        {brief.dataFresh
-          ? <Spinner type="dots" label={scanLabel} />
-          : <Badge variant="error">STALE</Badge>}
+      <Box justifyContent="space-between" flexWrap="nowrap" overflow="hidden">
+        <Text wrap="truncate" bold color="cyan">TRADER BRIEF — {brief.symbol}</Text>
+        <Box flexShrink={0}>
+          {brief.dataFresh
+            ? <Spinner type="dots" label={scanLabel} />
+            : <Badge variant="error">STALE</Badge>}
+        </Box>
       </Box>
-      <Box gap={1} alignItems="center">
+      <Text wrap="truncate">
         <Badge variant={stanceVariant(brief.stance)}>{brief.stance}</Badge>
-        <Text color="white" wrap="truncate">{brief.headline}</Text>
-      </Box>
+        <Text color="white"> {brief.headline}</Text>
+      </Text>
       <BriefRegimeRow brief={brief} conf={conf} />
       <BriefNotes brief={brief} />
     </Box>

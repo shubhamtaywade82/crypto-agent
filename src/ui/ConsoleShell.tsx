@@ -123,7 +123,8 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
   const k = getKernel();
   const { timeline, circuit, agentState } = useConsoleMetrics(s, k);
   const { stdout } = useStdout();
-  const h = Math.max(8, (stdout.rows || process.stdout.rows || 24) - 8);
+  const rows = stdout.rows || process.stdout.rows || 24;
+  const h = Math.max(8, rows - 10);
 
   return (
     <Box flexDirection="column" paddingX={1} gap={0} height={stdout.rows || undefined} overflow="hidden">

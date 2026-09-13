@@ -79,7 +79,7 @@ describe('toOpportunityTableRow', () => {
     expect(row).toEqual({
       n: '1',
       symbol: 'ETH',
-      setup: 'Pullback Reclaim',
+      setup: 'Pullback R',
       rr: '2.8',
       state: 'READY',
     });
@@ -94,5 +94,16 @@ describe('toOpportunityTableRow', () => {
     expect(row.conf).toBe('0.81');
     expect(row.regime).toBe('TREND_UP');
     expect(row.state).toBe('WATCH');
+  });
+});
+
+describe('fitCols and dividerLine', () => {
+  it('shrinks by the shell gutter so a full-width rule does not wrap', async () => {
+    const { fitCols, dividerLine } = await import('../src/components/ui/divider/index.js');
+    expect(fitCols(80)).toBe(78);
+    expect(fitCols(80, 34)).toBe(34);
+    const line = dividerLine('─', 78);
+    expect(line).toHaveLength(78);
+    expect(line.startsWith('──')).toBe(true);
   });
 });

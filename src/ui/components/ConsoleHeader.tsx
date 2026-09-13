@@ -55,30 +55,30 @@ const circuitVariant = (risk: string): BadgeVariant =>
 const HeaderMetrics = ({ p, pnlSign, pnlColor, time }: {
   readonly p: ConsoleHeaderProps; readonly pnlSign: string; readonly pnlColor: string; readonly time: string;
 }): React.JSX.Element => (
-  <Box>
+  <>
     <Text color="gray"> │ </Text>
     <Text>Eq </Text><Text bold>${p.equity.toFixed(2)}</Text>
     <Text color="gray"> │ </Text>
     <Text>PnL </Text><Text color={pnlColor}>{pnlSign}${p.dailyPnl.toFixed(2)}</Text>
     <Text color="gray"> │ </Text>
     <Text color="gray">#{p.cycle} {time}</Text>
-  </Box>
+  </>
 );
 
 const HeaderTitleRow = ({ date, uptime, liveLabel }: {
   readonly date: string; readonly uptime: string; readonly liveLabel: string;
 }): React.JSX.Element => (
-  <Box>
+  <Text wrap="truncate">
     <Text bold color="cyan">CRYPTO-AGENT v1.0.0</Text>
     <Text color="gray"> │ </Text><Text color="gray">{date}</Text>
     <Text color="gray"> │ </Text>
     <Badge variant={liveLabel === 'LIVE' ? 'error' : 'info'}>{liveLabel}</Badge>
     <Text color="gray"> │ </Text><Text color="gray">up {uptime}</Text>
-  </Box>
+  </Text>
 );
 
 const HeaderStatusRow = (p: ConsoleHeaderProps & { readonly risk: string; readonly pnlSign: string; readonly pnlColor: string; readonly time: string }): React.JSX.Element => (
-  <Box alignItems="center">
+  <Text wrap="truncate">
     <Badge variant={p.venue.toLowerCase() === 'live' ? 'error' : 'info'}>{p.venue.toUpperCase()}</Badge>
     <Text color="gray"> agent:</Text>
     <Text bold color={p.agentState === 'BUSY' ? 'yellow' : 'green'}>{p.agentState}</Text>
@@ -89,7 +89,7 @@ const HeaderStatusRow = (p: ConsoleHeaderProps & { readonly risk: string; readon
     <Text color="gray"> risk:</Text>
     <Badge variant={circuitVariant(p.risk)}>{p.risk}</Badge>
     <HeaderMetrics p={p} pnlSign={p.pnlSign} pnlColor={p.pnlColor} time={p.time} />
-  </Box>
+  </Text>
 );
 
 export const ConsoleHeader = (p: ConsoleHeaderProps): React.JSX.Element => {

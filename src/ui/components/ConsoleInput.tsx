@@ -55,6 +55,7 @@ export const ConsoleInput = (p: ConsoleInputProps): React.JSX.Element => {
           onEscape={() => handleInputEscape(p)}
         />
       )}
+      <Divider style="single" />
     </Box>
   );
 };

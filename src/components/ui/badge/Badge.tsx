@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, Box } from 'ink';
+import { Text } from 'ink';
 import { darkTheme } from '../_core.js';
 import type { InkUITheme } from '../_core.js';
 
@@ -31,8 +31,6 @@ export const Badge: React.FC<BadgeProps> = ({
 }) => {
   const color = variantColor(variant, theme);
   return (
-    <Box>
-      <Text color={color} bold inverse>{` ${children} `}</Text>
-    </Box>
+    <Text color={color} bold inverse>{` ${children} `}</Text>
   );
 };

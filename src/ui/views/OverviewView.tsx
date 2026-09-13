@@ -124,11 +124,11 @@ const SidebarPortfolio = ({ snap, limits }: {
     <Text bold color="yellow">PORTFOLIO</Text>
     <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text></Text>
     <Text color="gray">Today <Text color={snap.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{snap.dailyRealizedPnl >= 0 ? '+' : ''}${snap.dailyRealizedPnl.toFixed(2)}</Text></Text>
+    <Text color="gray">Pos <Text color="white">{snap.openPositions}/{limits.maxConcurrentPositions}</Text></Text>
     <ProgressBar
       value={limits.maxConcurrentPositions === 0 ? 0 : (snap.openPositions / limits.maxConcurrentPositions) * 100}
-      width={16}
+      width={10}
       showPercent={false}
-      label={`Pos ${snap.openPositions}/${limits.maxConcurrentPositions}`}
     />
     <Text color="gray">Lev <Text color="white">{limits.maxLeverage}x</Text></Text>
   </Box>

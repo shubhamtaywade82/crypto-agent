@@ -46,7 +46,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   const emptyStr = EMPTY.repeat(empty);
 
   return (
-    <Box>
+    <Box flexShrink={0}>
       {label ? <Text>{label} </Text> : null}
       <Text color={theme.colors.primary}>{filledStr}</Text>
       <Text color={theme.colors.muted}>{emptyStr}</Text>
