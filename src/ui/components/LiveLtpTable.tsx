@@ -90,7 +90,7 @@ const LTP_COLUMNS: TableColumn<LtpTableRow>[] = [
   { key: 'status', header: 'STATUS' },
 ];
 
-export const LiveLtpTable = (): React.JSX.Element => {
+export const LiveLtpTable = ({ hideHeader }: { readonly hideHeader?: boolean } = {}): React.JSX.Element => {
   useLiveTick();
   const symbols = useMemo(() => kernelWatchSymbols(), []);
   const traded = useMemo(() => new Set(
@@ -102,10 +102,12 @@ export const LiveLtpTable = (): React.JSX.Element => {
 
   return (
     <Box flexDirection="column">
-      <Box justifyContent="space-between">
-        <Text bold color="cyan">LIVE LTP — ALL SYMBOLS</Text>
-        <Text color="gray">WS miniTicker + bookTicker</Text>
-      </Box>
+      {!hideHeader && (
+        <Box justifyContent="space-between">
+          <Text bold color="cyan">LIVE LTP — ALL SYMBOLS</Text>
+          <Text color="gray">WS miniTicker + bookTicker</Text>
+        </Box>
+      )}
       <Table data={data} columns={LTP_COLUMNS} />
     </Box>
   );

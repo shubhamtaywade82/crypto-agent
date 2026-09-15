@@ -1,7 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { Badge, type BadgeVariant } from '../../components/ui/badge/index.js';
-import { Spinner } from '../../components/ui/spinner/index.js';
 import type { TraderBrief, TraderStance } from '../overview-brief.js';
 
 import { fmtPrice } from '../KernelDashboard.js';
@@ -69,13 +68,15 @@ export const TraderBriefPanel = ({ brief }: { readonly brief: TraderBrief }): Re
     : 'Market Data: LIVE';
 
   return (
-    <Box flexDirection="column" gap={0}>
+    <Box flexDirection="column" gap={0} flexShrink={0}>
       <Box justifyContent="space-between" flexWrap="nowrap" overflow="hidden">
         <Text wrap="truncate" bold color="cyan">TRADER BRIEF — {brief.symbol}</Text>
         <Box flexShrink={0}>
-          {brief.dataFresh
-            ? <Spinner type="dots" label={scanLabel} />
-            : <Badge variant="error">STALE</Badge>}
+          {brief.dataFresh ? (
+            <Text color="gray"><Text color="green">●</Text> {scanLabel}</Text>
+          ) : (
+            <Badge variant="error">STALE</Badge>
+          )}
         </Box>
       </Box>
       <Text wrap="truncate">

@@ -67,7 +67,7 @@ export const toOpportunityTableRow = (
     symbol: compact ? shortSym(c.symbol, 5) : c.symbol,
     setup: compact ? c.setup.slice(0, 10) : c.setup,
     rr: c.rr.toFixed(1),
-    state: compact ? c.state.slice(0, 7) : c.state,
+    state: compact ? (c.state === 'REJECTED' ? 'REJECT' : c.state.slice(0, 8)) : c.state,
   };
   if (compact) return base;
   return { ...base, direction: c.direction, tf: c.tf, conf: c.confidence.toFixed(2), regime: c.regime };

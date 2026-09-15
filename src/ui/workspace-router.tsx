@@ -37,11 +37,13 @@ export interface WorkspaceRouterProps {
   readonly streamLive?: boolean;
   readonly autoEnabled?: boolean;
   readonly port?: ReturnType<typeof usePortfolio>;
+  readonly height?: number;
+  readonly setSelectedIndex?: React.Dispatch<React.SetStateAction<number>>;
 }
 
 const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
   switch (p.activeTab) {
-    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} streamLive={p.streamLive} autoEnabled={p.autoEnabled} port={p.port} />;
+    case 'overview': return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} streamLive={p.streamLive} autoEnabled={p.autoEnabled} port={p.port} height={p.height} setSelectedIndex={p.setSelectedIndex} />;
     case 'agent': return <AgentView focusSymbol={p.focusSymbol} snapshots={p.pipelineSnapshots} transcript={p.transcript} selectedIndex={p.selectedIndex} chat={p.chat} history={p.history} />;
     case 'opps': return <OpportunitiesView selectedIndex={p.selectedIndex} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} />;
     case 'positions': return <PositionsView positions={p.positions} selectedIndex={p.selectedIndex} />;
@@ -51,7 +53,7 @@ const renderTab = (p: WorkspaceRouterProps): React.JSX.Element => {
     case 'learning': return <LearningView />;
     case 'events': return <EventsView timeline={p.timeline} selectedIndex={p.selectedIndex} />;
     case 'system': return <SystemView />;
-    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} streamLive={p.streamLive} autoEnabled={p.autoEnabled} port={p.port} />;
+    default: return <OverviewView selectedIndex={p.selectedIndex} positions={p.positions} focusSymbol={p.focusSymbol} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} transcript={p.transcript} pipelineSnapshots={p.pipelineSnapshots} streamLive={p.streamLive} autoEnabled={p.autoEnabled} port={p.port} height={p.height} setSelectedIndex={p.setSelectedIndex} />;
   }
 };
 

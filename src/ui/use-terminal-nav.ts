@@ -7,7 +7,7 @@ export interface TerminalNavState {
   readonly activeTab: WorkspaceTab;
   readonly setActiveTab: (tab: WorkspaceTab) => void;
   readonly selectedIndex: number;
-  readonly setSelectedIndex: (idx: number) => void;
+  readonly setSelectedIndex: React.Dispatch<React.SetStateAction<number>>;
   readonly activeModal: ActiveModal | null;
   readonly openModal: (modal: ActiveModal) => void;
   readonly closeModal: () => void;

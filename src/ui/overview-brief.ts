@@ -80,6 +80,9 @@ const stanceFromTrace = (trace: PipelineTrace, riskOk: boolean): { stance: Trade
   if (trace.risk?.approved === false) {
     return { stance: 'AVOID', headline: trace.risk.reasons.join('; ') || 'Policy gate rejected' };
   }
+  if (trace.status === 'REJECTED' || trace.status === 'INVALID_PROPOSAL') {
+    return { stance: 'AVOID', headline: trace.error ?? (trace.risk?.reasons.join('; ') || 'Proposal rejected') };
+  }
   const setup = topSetup(trace);
   const action = trace.outcome?.action;
   if (action === 'EXIT') return { stance: 'AVOID', headline: 'Exit signal active — do not add exposure' };
@@ -197,7 +200,11 @@ export const buildTraderBrief = (
     });
   }
 
-  const gatePass = trace.risk?.approved ? 'gate PASS' : 'gate pending';
+  const gatePass = trace.status === 'REJECTED' || trace.risk?.approved === false
+    ? 'gate REJECTED'
+    : trace.risk?.approved
+    ? 'gate PASS'
+    : 'gate pending';
   return buildTraceBrief(sym, trace, opportunities, {
     ok: block === null,
     block,

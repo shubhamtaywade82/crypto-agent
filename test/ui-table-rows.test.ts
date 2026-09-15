@@ -85,6 +85,11 @@ describe('toOpportunityTableRow', () => {
     });
   });
 
+  it('compact rows map REJECTED to REJECT rather than REJECTE', () => {
+    const row = toOpportunityTableRow(opp({ state: 'REJECTED' }), 0, true);
+    expect(row.state).toBe('REJECT');
+  });
+
   it('full rows include direction, tf, confidence, and regime', () => {
     const row = toOpportunityTableRow(opp({ direction: 'SHORT', state: 'WATCH' }), 2, false);
     expect(row.n).toBe('3');
@@ -142,5 +147,30 @@ describe('formatPrecision and fmtPrice precision retention', () => {
     expect(row.bid).toBe('$0.4900');
     expect(row.ask).toBe('$0.5100');
     expect(row.mark).toBe('$0.5000');
+  });
+
+  it('calculates computeScrollY correctly for viewport scrolling', async () => {
+    const { computeScrollY } = await import('../src/ui/views/OverviewView.js');
+    // Fits completely
+    expect(computeScrollY(0, 50)).toEqual({ scrollY: 0, maxScroll: 0, maxIdx: 0 });
+    // Viewport height 20 -> maxScroll = 18, step = 3
+    const s0 = computeScrollY(0, 20);
+    expect(s0.scrollY).toBe(0);
+    expect(s0.maxScroll).toBe(18);
+    expect(s0.maxIdx).toBe(6);
+
+    const s1 = computeScrollY(1, 20);
+    expect(s1.scrollY).toBe(3);
+
+    const s3 = computeScrollY(3, 20);
+    expect(s3.scrollY).toBe(9);
+
+    // Clamps at maxScroll
+    const s10 = computeScrollY(10, 20);
+    expect(s10.scrollY).toBe(18);
+
+    // Negative index clamped
+    const sNeg = computeScrollY(-2, 20);
+    expect(sNeg.scrollY).toBe(0);
   });
 });

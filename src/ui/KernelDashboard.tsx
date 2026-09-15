@@ -106,7 +106,7 @@ const DepthHeader = (p: {
   readonly micro?: MicrostructureView;
   readonly symbol?: string;
 }): React.JSX.Element => (
-  <Box justifyContent="center" marginBottom={1}>
+  <Box justifyContent="center" marginBottom={0}>
     <Text>
       <Text bold color="white">{pxLabel('LTP', p.last, p.symbol)}</Text>
       <Text color="gray"> │ </Text>
@@ -130,7 +130,7 @@ const DepthAggregate = (p: {
   const bidVol = bookNotional(p.bids);
   const askVol = bookNotional(p.asks);
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={0} flexShrink={0}>
       <Text color="gray">
         Book bid {p.micro.bidDepth.toFixed(1)} ({fmtVol(bidVol)}) │ ask {p.micro.askDepth.toFixed(1)} ({fmtVol(askVol)}) │ imb {(p.micro.imbalance * 100).toFixed(0)}% │ tape {fmtVol(p.micro.buyVolume)} / {fmtVol(p.micro.sellVolume)} │ Δ {fmtVol(p.micro.tradeDelta)}
       </Text>
@@ -179,7 +179,7 @@ export const DepthLadder = ({ bids, asks, last, mark, micro, symbol }: DepthLadd
   const sep = ' │ ';
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       <DepthHeader last={effectiveLast} mark={effectiveMark} micro={micro} symbol={symbol} />
       <Text color="gray">
         <Text color="green">{`${'qty'.padStart(W_QTY)} ${'vol'.padStart(W_VOL)} ${'price'.padStart(W_PX)}`}</Text>

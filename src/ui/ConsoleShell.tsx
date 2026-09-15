@@ -65,19 +65,35 @@ const useConsoleNav = (
   return { nav, onSubmit };
 };
 
-const useConsoleHistoryControls = (
-  history: ReturnType<typeof useConsoleState>['history'],
-  inputVal: string,
-  setInputVal: (v: string) => void,
-  closeModal: () => void
-): {
+interface ConsoleHistoryOpts {
+  readonly nav: ReturnType<typeof useTerminalNav>;
+  readonly history: ReturnType<typeof useConsoleState>['history'];
+  readonly inputVal: string;
+  readonly setInputVal: (v: string) => void;
+  readonly closeModal: () => void;
+}
+
+const useConsoleHistoryControls = (opts: ConsoleHistoryOpts): {
   readonly onHistoryUp: () => void;
   readonly onHistoryDown: () => void;
   readonly onEscape: () => void;
 } => {
+  const { nav, history, inputVal, setInputVal, closeModal } = opts;
   const { handleUp, handleDown } = usePromptHistoryNavigation(history, inputVal, setInputVal);
-  const onHistoryUp = useCallback((): void => { handleUp(); }, [handleUp]);
-  const onHistoryDown = useCallback((): void => { handleDown(); }, [handleDown]);
+  const onHistoryUp = useCallback((): void => {
+    if (inputVal.length === 0 && nav.selectedIndex > 0) {
+      nav.setSelectedIndex((i) => Math.max(0, i - 1));
+      return;
+    }
+    handleUp();
+  }, [handleUp, inputVal.length, nav]);
+  const onHistoryDown = useCallback((): void => {
+    if (inputVal.length === 0) {
+      nav.setSelectedIndex((i) => i + 1);
+      return;
+    }
+    handleDown();
+  }, [handleDown, inputVal.length, nav]);
   const onEscape = useCallback((): void => { setInputVal(''); closeModal(); }, [closeModal, setInputVal]);
   return { onHistoryUp, onHistoryDown, onEscape };
 };
@@ -102,7 +118,7 @@ const ConsoleWorkspaceView = (p: {
   readonly timeline: readonly ActivityTimelineItem[];
   readonly height: number;
 }): React.JSX.Element => (
-  <Box flexDirection="column" height={p.height} overflow="hidden">
+  <Box flexDirection="column" flexGrow={1} flexShrink={1} height={p.height} overflow="hidden">
     <WorkspaceRouter
       activeTab={p.nav.activeTab} selectedIndex={p.nav.selectedIndex} activeModal={p.nav.activeModal}
       closeModal={p.nav.closeModal} positions={p.positions} timeline={p.timeline} focusSymbol={p.s.focusSymbol}
@@ -110,6 +126,7 @@ const ConsoleWorkspaceView = (p: {
       pipelineSnapshots={p.s.pipelineSnapshots} transcript={p.s.transcript}
       chat={p.s.chat} history={p.s.history} streamLive={p.s.streamLive}
       autoEnabled={p.s.auto.enabled} port={p.s.port}
+      height={p.height} setSelectedIndex={p.nav.setSelectedIndex}
     />
   </Box>
 );
@@ -119,7 +136,9 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
   const [inputVal, setInputVal] = useState('');
   const positions = usePositionsPoll();
   const { nav, onSubmit } = useConsoleNav(s, inputVal, setInputVal, p.exit);
-  const { onHistoryUp, onHistoryDown, onEscape } = useConsoleHistoryControls(s.history, inputVal, setInputVal, nav.closeModal);
+  const { onHistoryUp, onHistoryDown, onEscape } = useConsoleHistoryControls({
+    nav, history: s.history, inputVal, setInputVal, closeModal: nav.closeModal,
+  });
   const k = getKernel();
   const { timeline, circuit, agentState } = useConsoleMetrics(s, k);
   const { stdout } = useStdout();
@@ -133,15 +152,17 @@ export const ConsoleShell = (p: { readonly exit: () => void }): React.JSX.Elemen
         executionOk={!k.killSwitch.halted} circuit={circuit} killSwitchHalted={k.killSwitch.halted}
         cycle={s.pipelineCycle} equity={s.port.equity} dailyPnl={s.port.dailyRealizedPnl}
       />
-      <TabsBar activeTab={nav.activeTab} />
+      <Box flexShrink={0}><TabsBar activeTab={nav.activeTab} /></Box>
       <ConsoleWorkspaceView nav={nav} s={s} positions={positions} timeline={timeline} height={h} />
-      <ConsoleInput
-        value={inputVal} busy={s.chat.isBusy} focused={!s.chat.isBusy}
-        statusText={s.chat.status} spinner={s.spinner}
-        onSubmit={onSubmit} onChange={setInputVal} onHistoryUp={onHistoryUp} onHistoryDown={onHistoryDown}
-        onEscape={onEscape}
-      />
-      <ConsoleFooter activeTab={nav.activeTab} commandMode={inputVal.startsWith('/')} />
+      <Box flexShrink={0}>
+        <ConsoleInput
+          value={inputVal} busy={s.chat.isBusy} focused={!s.chat.isBusy}
+          statusText={s.chat.status} spinner={s.spinner}
+          onSubmit={onSubmit} onChange={setInputVal} onHistoryUp={onHistoryUp} onHistoryDown={onHistoryDown}
+          onEscape={onEscape}
+        />
+      </Box>
+      <Box flexShrink={0}><ConsoleFooter activeTab={nav.activeTab} commandMode={inputVal.startsWith('/')} /></Box>
     </Box>
   );
 };

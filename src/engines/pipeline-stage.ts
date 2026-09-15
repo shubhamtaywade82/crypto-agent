@@ -273,7 +273,7 @@ export const stageExecution = async (
 
   // Research gate: ACTIVE strategy AND approved (setup × regime) cell.
   if (!(await strategyCellStage(deps, staged, proposal, state.regime))) {
-    return { ...staged, status: 'REJECTED' };
+    return { ...staged, status: 'REJECTED', error: 'Strategy cell or evidence gate rejected' };
   }
 
   const validation = validateProposal(
