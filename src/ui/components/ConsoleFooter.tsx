@@ -36,7 +36,7 @@ export const ConsoleFooter = ({ commandMode }: ConsoleFooterProps): React.JSX.El
   <Box flexDirection="column" marginTop={0}>
     <Box justifyContent="space-between" alignItems="center">
       <KeyHint keys={[...FOOTER_KEYS]} />
-      {commandMode ? <Badge variant="warning">COMMAND MODE</Badge> : <Text color="gray" italic>Not financial advice.</Text>}
+      {commandMode ? <Badge variant="warning">COMMAND MODE</Badge> : <Text color="gray" italic>{'  '}Not financial advice.</Text>}
     </Box>
   </Box>
 );
