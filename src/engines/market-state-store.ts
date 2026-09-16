@@ -195,7 +195,8 @@ export class MarketStateStore {
 
   pushTrade(symbol: string, trade: TradePrint): void {
     const b = this.book(symbol);
-    b.trades = [...b.trades, trade].slice(-TRADE_CAP);
+    b.trades.push(trade);
+    if (b.trades.length > TRADE_CAP) b.trades.splice(0, b.trades.length - TRADE_CAP);
     b.last = trade.price;
     b.tradeSeq += 1;
     this.touch(b, trade.at);

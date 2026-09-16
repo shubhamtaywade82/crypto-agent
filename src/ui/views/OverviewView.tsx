@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { Divider } from '../../components/ui/divider/index.js';
 import { StatusIndicator } from '../../components/ui/status-indicator/index.js';
@@ -16,6 +16,7 @@ import { TraderBriefPanel } from '../components/TraderBriefPanel.js';
 import type { TranscriptEntry } from '../transcript.js';
 import { buildTraderBrief } from '../overview-brief.js';
 import type { PipelineSnapshots } from '../pipeline-view.js';
+import { kernelWatchSymbols } from '../../kernel-streams.js';
 import { ensureSymbolTracked } from '../../engines/market-hydrate.js';
 import type { usePortfolio } from '../app-hooks.js';
 import { deriveCircuitState } from '../../domain/risk/risk-config.js';
@@ -36,7 +37,7 @@ export interface OverviewViewProps {
   readonly setSelectedIndex?: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const TOTAL_VIEW_HEIGHT = 32;
+const TOTAL_VIEW_HEIGHT = 38;
 const SCROLL_STEP = 3;
 
 export const computeScrollY = (
@@ -84,18 +85,21 @@ const MarketWatchPanel = ({ focusSymbol, scrollHint }: {
   readonly focusSymbol: string;
   readonly scrollHint?: string;
 }): React.JSX.Element => {
+  const symbols = useMemo(() => kernelWatchSymbols(), []);
   useEffect(() => {
     void ensureSymbolTracked(focusSymbol);
-  }, [focusSymbol]);
+    for (const sym of symbols) void ensureSymbolTracked(sym);
+  }, [focusSymbol, symbols]);
   return (
     <Box flexDirection="column" gap={0} flexShrink={0}>
       <Box justifyContent="space-between" marginBottom={0}>
-        <Text bold color="cyan">FOCUS MARKET — ORDER BOOK & TAPE</Text>
+        <Text bold color="cyan">MARKET WATCH — ALL SYMBOLS · ORDER BOOK & TAPE</Text>
         <Text color="gray">
           /focus <Text bold color="yellow">{focusSymbol}</Text>
           {scrollHint ? <Text color="yellow"> │ {scrollHint}</Text> : null}
         </Text>
       </Box>
+      <LiveLtpTable hideHeader />
       <DepthAndTape symbol={focusSymbol} />
     </Box>
   );
@@ -140,8 +144,7 @@ const SidebarPortfolio = ({ snap, limits }: {
 }): React.JSX.Element => (
   <Box flexDirection="column" flexShrink={0}>
     <Text bold color="yellow">PORTFOLIO</Text>
-    <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text></Text>
-    <Text color="gray">Today <Text color={snap.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{snap.dailyRealizedPnl >= 0 ? '+' : ''}${snap.dailyRealizedPnl.toFixed(2)}</Text></Text>
+    <Text color="gray">Eq <Text bold color="white">${snap.equity.toFixed(2)}</Text> │ Today <Text color={snap.dailyRealizedPnl >= 0 ? 'green' : 'red'}>{snap.dailyRealizedPnl >= 0 ? '+' : ''}${snap.dailyRealizedPnl.toFixed(2)}</Text></Text>
     <Box gap={1}>
       <Text color="gray">Pos <Text color="white">{snap.openPositions}/{limits.maxConcurrentPositions}</Text></Text>
       <ProgressBar
@@ -163,7 +166,7 @@ const TopOpportunities = ({ opps, isScanning }: {
     {opps.length === 0 ? (
       <Text color="gray" italic wrap="truncate">None active</Text>
     ) : (
-      <OpportunityTable rows={opps.slice(0, 4)} isScanning={isScanning} selectedIndex={-1} compact />
+      <OpportunityTable rows={opps.slice(0, 3)} isScanning={isScanning} selectedIndex={-1} compact />
     )}
   </Box>
 );
@@ -171,7 +174,6 @@ const TopOpportunities = ({ opps, isScanning }: {
 const OverviewSidebar = (p: {
   readonly positions: readonly BrokerPosition[];
   readonly opportunities: readonly ScanOpportunity[];
-  readonly markets?: readonly MonitoredMarket[];
   readonly isScanning?: boolean;
   readonly streamLive?: boolean;
   readonly port?: ReturnType<typeof usePortfolio>;
@@ -203,11 +205,10 @@ const OverviewMainContent = ({
     <TraderBriefPanel brief={brief} />
     <Divider style="single" />
     <Box flexDirection="row" gap={1} flexShrink={0}>
-      <Box flexDirection="column" flexGrow={1} minWidth={40} flexShrink={0} gap={1}>
-        <AgentConsoleFeed entries={p.transcript ?? []} scrollOffset={0} autoScroll={p.autoEnabled ?? true} limit={4} />
-        <LiveLtpTable />
+      <Box flexDirection="column" flexGrow={1} minWidth={40} flexShrink={0}>
+        <AgentConsoleFeed entries={p.transcript ?? []} scrollOffset={0} autoScroll={p.autoEnabled ?? true} limit={5} />
       </Box>
-      <OverviewSidebar positions={p.positions} opportunities={p.opportunities} markets={p.markets} isScanning={p.isScanning} streamLive={p.streamLive} port={p.port} />
+      <OverviewSidebar positions={p.positions} opportunities={p.opportunities} isScanning={p.isScanning} streamLive={p.streamLive} port={p.port} />
     </Box>
     <Divider style="single" />
     <MarketWatchPanel focusSymbol={p.focusSymbol} scrollHint={scrollHint} />

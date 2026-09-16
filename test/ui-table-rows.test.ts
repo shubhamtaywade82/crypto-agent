@@ -153,11 +153,11 @@ describe('formatPrecision and fmtPrice precision retention', () => {
     const { computeScrollY } = await import('../src/ui/views/OverviewView.js');
     // Fits completely
     expect(computeScrollY(0, 50)).toEqual({ scrollY: 0, maxScroll: 0, maxIdx: 0 });
-    // Viewport height 20 -> maxScroll = 12, step = 3
+    // Viewport height 20 -> maxScroll = 18, step = 3
     const s0 = computeScrollY(0, 20);
     expect(s0.scrollY).toBe(0);
-    expect(s0.maxScroll).toBe(12);
-    expect(s0.maxIdx).toBe(4);
+    expect(s0.maxScroll).toBe(18);
+    expect(s0.maxIdx).toBe(6);
 
     const s1 = computeScrollY(1, 20);
     expect(s1.scrollY).toBe(3);
@@ -167,7 +167,7 @@ describe('formatPrecision and fmtPrice precision retention', () => {
 
     // Clamps at maxScroll
     const s10 = computeScrollY(10, 20);
-    expect(s10.scrollY).toBe(12);
+    expect(s10.scrollY).toBe(18);
 
     // Negative index clamped
     const sNeg = computeScrollY(-2, 20);

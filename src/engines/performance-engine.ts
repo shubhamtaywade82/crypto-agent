@@ -100,8 +100,13 @@ export class PerformanceEngine {
   /** Record one realized position close (pnl in canonical USDT). */
   recordTradeClosed(pnl: number, at = Date.now(), opts: { persist?: boolean } = {}): void {
     this.closes.push({ pnl, at });
+    // Keep only the 500 most recent closes — enough for accurate stats, prevents unbounded growth.
+    if (this.closes.length > 500) this.closes.shift();
     const day = utcDay(at);
     this.dailyPnl.set(day, (this.dailyPnl.get(day) ?? 0) + pnl);
+    // Prune keys older than 7 days so the Map doesn't grow indefinitely.
+    const cutoff = utcDay(at) - 7;
+    for (const k of this.dailyPnl.keys()) { if (k < cutoff) this.dailyPnl.delete(k); }
     if (pnl < 0) {
       this.lossStreak += 1;
       this.winStreak = 0;

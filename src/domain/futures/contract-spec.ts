@@ -24,7 +24,7 @@ export const FALLBACK_SPEC = (baseAsset: string, quoteAsset = 'USDT'): ContractS
   minQuantity: 0.01,
   maxQuantity: 10_000,
   minNotional: 20,
-  maxLeverage: 5,
+  maxLeverage: 15,
   maintenanceMarginRate: 0.005,
 });
 

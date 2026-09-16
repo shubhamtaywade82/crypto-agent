@@ -233,6 +233,8 @@ export class FillsLedger {
   private fold(p: Partial<FillRecord>): void {
     if (p.price === undefined || p.quantity === undefined || !p.symbol || !p.side) return;
     this.fills.push(p as FillRecord);
+    // Prevent unbounded heap growth — cap at 10 000 most-recent fills.
+    if (this.fills.length > 10_000) this.fills.splice(0, this.fills.length - 10_000);
     if (p.decisionId && p.cumulativeQuantity !== undefined) {
       this.lastCumulative.set(p.decisionId, Math.max(
         this.lastCumulative.get(p.decisionId) ?? 0, p.cumulativeQuantity
@@ -327,6 +329,8 @@ export class FillsLedger {
       this.positions.delete(position.positionId);
       this.openBySymbol.delete(position.symbol);
       this.positionsClosed += 1;
+      // Release decision-ID tracking entries once the position is fully closed.
+      for (const a of allocations) this.lastCumulative.delete(a.decisionId);
       this.persist('position.closed', {
         positionId: position.positionId, symbol: position.symbol, side: position.side,
         realizedPnl: Number(position.realizedPnl.toFixed(10)),

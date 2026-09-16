@@ -6,7 +6,7 @@ export const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxRiskPerTradePercent: 0.25,
   maxDailyLossPercent: 1.0,
   maxDrawdownPercent: 5.0,
-  maxLeverage: 2,
+  maxLeverage: 15,
   minRiskRewardRatio: 2.5,
   maxConcurrentPositions: 2,
   maxNotionalPerTrade: 250_000,

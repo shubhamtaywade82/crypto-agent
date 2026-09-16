@@ -57,7 +57,7 @@ describe('TradeValidator invariants', () => {
 
   it('rejects leverage above the cap', () => {
     const v = validateProposal(
-      base({ leverage: 5 }),
+      base({ leverage: 16 }),
       limits.minRiskRewardRatio, limits.maxLeverage
     );
     expect(v.valid).toBe(false);

@@ -138,12 +138,12 @@ const emitSnapshot = (
 };
 
 /** Event-driven path: fresh WS store -> MTF + setups with zero REST. */
-const streamContext = (deps: PipelineDeps, symbol: string): MarketContext | undefined => {
+const streamContext = (deps: PipelineDeps, symbol: string, circuit: Parameters<typeof detectSetups>[2]): MarketContext | undefined => {
   const maxStaleMs = deps.marketMaxStaleMs ?? 45_000;
   if (!deps.marketStore?.isFresh(symbol, maxStaleMs)) return undefined;
   const mtf = buildMtfFromStore(deps.marketStore, symbol);
   if (!mtf) return undefined;
-  const setups = detectSetups(mtf, deps.limits);
+  const setups = detectSetups(mtf, deps.limits, circuit);
   deps.ledger?.recordMark(symbol, mtf.state.price.mark);
   const ctx: MarketContext = { mtf, setups };
   emitSnapshot(deps, ctx, symbol, 'stream');
@@ -151,11 +151,11 @@ const streamContext = (deps: PipelineDeps, symbol: string): MarketContext | unde
 };
 
 /** REST recovery path (cold start, stream stale/down, partial ladders). */
-const restContext = async (deps: PipelineDeps, symbol: string): Promise<MarketContext> => {
+const restContext = async (deps: PipelineDeps, symbol: string, circuit: Parameters<typeof detectSetups>[2]): Promise<MarketContext> => {
   const mtf: MtfResult = await buildMarketState(deps.provider, symbol);
   // Feed the learning ledger's MAE/MFE trackers with the fresh mark.
   deps.ledger?.recordMark(symbol, mtf.state.price.mark);
-  const ctx: MarketContext = { mtf, setups: detectSetups(mtf, deps.limits) };
+  const ctx: MarketContext = { mtf, setups: detectSetups(mtf, deps.limits, circuit) };
   emitSnapshot(deps, ctx, symbol, 'rest');
   return ctx;
 };
@@ -163,8 +163,9 @@ const restContext = async (deps: PipelineDeps, symbol: string): Promise<MarketCo
 /** Market data + setup detection: the shared pre-strategy stage. */
 const gatherMarketContext = async (
   deps: PipelineDeps,
-  symbol: string
-): Promise<MarketContext> => streamContext(deps, symbol) ?? (await restContext(deps, symbol));
+  symbol: string,
+  circuit: Parameters<typeof detectSetups>[2]
+): Promise<MarketContext> => streamContext(deps, symbol, circuit) ?? (await restContext(deps, symbol, circuit));
 
 export const runTradingPipeline = async (
   deps: PipelineDeps,
@@ -176,7 +177,8 @@ export const runTradingPipeline = async (
       return haltedTrace(deps, symbol);
     }
     const portfolio = await refreshPortfolio(deps, symbol);
-    const { mtf, setups } = await gatherMarketContext(deps, symbol);
+    const circuit = deriveCircuitState(portfolio.dailyLossPercent, portfolio.drawdownPercent, portfolio.lossStreak, deps.limits);
+    const { mtf, setups } = await gatherMarketContext(deps, symbol, circuit);
     const state = mtf.state;
     const base: PipelineTrace = {
       symbol, ranAt: Date.now(), status: 'NO_SETUPS', regime: state.regime, state, setups,

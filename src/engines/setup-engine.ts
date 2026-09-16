@@ -1,9 +1,10 @@
 import type { TradeDirection } from '../domain/primitives.js';
 import type { MarketState, Timeframe } from '../domain/market/types.js';
-import type { RiskLimits } from '../domain/risk/risk-config.js';
+import type { RiskLimits, CircuitState } from '../domain/risk/risk-config.js';
 import type { MtfResult } from './mtf-engine.js';
 import { makeId } from '../domain/primitives.js';
 import { microstructureConfidenceDelta } from './microstructure-engine.js';
+import { resolveLeverage } from './leverage-policy.js';
 
 type RawSetup = {
   readonly type: SetupType;
@@ -84,11 +85,7 @@ const confidenceOf = (state: MarketState, direction: TradeDirection, alignment: 
   return Math.max(0.05, Math.min(0.95, 0.4 + 0.1 * alignment + regimeBonus - volPenalty + flowAdj));
 };
 
-const finalize = (
-  state: MarketState,
-  base: RawSetup,
-  limits: RiskLimits
-): SetupCandidate => {
+const finalize = (state: MarketState, base: RawSetup, limits: RiskLimits, circuit: CircuitState): SetupCandidate => {
   const alignment = alignedCount(state, base.direction, ['4h', '1h', '15m']);
   const { tp, extended } = targetFor({
     direction: base.direction, entry: base.entry, stop: base.stopLoss,
@@ -99,19 +96,13 @@ const finalize = (
     base.direction === 'LONG'
       ? base.stopLoss < base.entry && tp > base.entry
       : base.stopLoss > base.entry && tp < base.entry;
+  const confidence = confidenceOf(state, base.direction, alignment);
+  const leverage = resolveLeverage(state, { direction: base.direction, confidence, htfAlignment: alignment }, circuit);
   return {
     id: makeId(`setup-${base.type.toLowerCase()}`),
-    type: base.type,
-    symbol: state.symbol,
-    direction: base.direction,
-    entry: base.entry,
-    stopLoss: base.stopLoss,
-    takeProfit: tp,
-    orderType: 'MARKET',
-    leverage: 1,
-    rr,
-    htfAlignment: alignment,
-    confidence: confidenceOf(state, base.direction, alignment),
+    type: base.type, symbol: state.symbol, direction: base.direction,
+    entry: base.entry, stopLoss: base.stopLoss, takeProfit: tp,
+    orderType: 'MARKET', leverage, rr, htfAlignment: alignment, confidence,
     thesis: base.thesis + (extended ? ' [TP extended to satisfy min RR]' : ''),
     invalidation: base.invalidation,
     warnings: extended ? ['take-profit extended beyond liquidity target'] : [],
@@ -233,7 +224,8 @@ const shortDetectors: readonly ((
  */
 export const detectSetups = (
   mtf: MtfResult,
-  limits: RiskLimits
+  limits: RiskLimits,
+  circuit: CircuitState = 'NORMAL'
 ): readonly SetupCandidate[] => {
   const state = mtf.state;
   const regimeBlocksLongs = state.regime === 'TREND_DOWN' || state.regime === 'PANIC';
@@ -248,7 +240,7 @@ export const detectSetups = (
     if (blocked || btcBlocks) return;
     for (const fn of fns) {
       const raw = fn(state, mtf);
-      if (raw) candidates.push(finalize(state, raw, limits));
+      if (raw) candidates.push(finalize(state, raw, limits, circuit));
     }
   };
   run(detectors, regimeBlocksLongs);
