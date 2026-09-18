@@ -88,7 +88,7 @@ export class BinanceMarketStream {
     this.store = opts.store;
     this.provider = opts.provider;
     this.audit = opts.audit;
-    this.url = opts.url ?? 'wss://fstream.binance.com/market/stream?streams=';
+    this.url = opts.url ?? 'wss://fstream.binance.com/stream?streams=';
     this.maxRetries = opts.maxRetries ?? 8;
     this.backoffBaseMs = opts.backoffBaseMs ?? 500;
     this.backoffCapMs = opts.backoffCapMs ?? 30_000;

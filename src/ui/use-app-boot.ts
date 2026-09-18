@@ -2,10 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { getKernel } from '../kernel.js';
 import { bootEventCouncil } from '../engines/event-council.js';
 import { hydrateWatchMicro } from '../engines/market-hydrate.js';
-import { kernelWatchSymbols } from '../kernel-streams.js';
 
-const hasMicroData = (): boolean =>
-  kernelWatchSymbols().some((sym) => (getKernel().marketStore.peekBook(sym)?.bids.length ?? 0) > 0);
+const isStreamLive = (): boolean => getKernel().streams.market?.status().state === 'LIVE';
 
 export const useStreamBoot = (): boolean => {
   const [live, setLive] = useState(false);
@@ -14,9 +12,9 @@ export const useStreamBoot = (): boolean => {
     kernel.reconciler.start();
     void kernel.startStreams()
       .then(() => { bootEventCouncil(kernel); return hydrateWatchMicro(); })
-      .then(() => setLive(hasMicroData()))
+      .then(() => setLive(isStreamLive()))
       .catch(() => setLive(false));
-    const poll = setInterval(() => { if (hasMicroData()) setLive(true); }, 1000);
+    const poll = setInterval(() => { setLive(isStreamLive()); }, 1000);
     return (): void => {
       clearInterval(poll);
       kernel.reconciler.stop();
