@@ -103,11 +103,19 @@ export const useAgentChat = (opts: AgentChatOpts): AgentChatResult => {
   };
 };
 
+const samePortfolio = (a: PortfolioState, b: PortfolioState): boolean =>
+  a.equity === b.equity && a.dailyRealizedPnl === b.dailyRealizedPnl &&
+  a.availableMargin === b.availableMargin && a.openPositions === b.openPositions;
+
 export const usePortfolio = (orchestrator: WatchOrchestrator): PortfolioState => {
   const [port, setPort] = useState<PortfolioState>(() => getKernel().portfolio.peek());
   useEffect(() => {
     orchestrator.start();
-    const poll = setInterval(() => { void getKernel().portfolio.refresh().then(setPort).catch(() => {}); }, 5000);
+    const poll = setInterval(() => {
+      void getKernel().portfolio.refresh()
+        .then((fresh) => setPort((prev) => (samePortfolio(prev, fresh) ? prev : fresh)))
+        .catch(() => {});
+    }, 5000);
     return (): void => { clearInterval(poll); orchestrator.stop(); };
   }, [orchestrator]);
   return port;

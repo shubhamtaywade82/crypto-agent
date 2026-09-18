@@ -38,7 +38,11 @@ export class MiEvidenceCache {
     const snap = deps.marketStore.snapshot(symbol);
     const fromStore = snap?.candles[tf];
     if (fromStore && fromStore.length >= 100) return fromStore;
-    return deps.provider.getKlines(symbol, tf, 300);
+    try {
+      return await deps.provider.getKlines(symbol, tf, 300);
+    } catch {
+      return fromStore ?? [];
+    }
   }
 
   async refresh(
@@ -57,6 +61,8 @@ export class MiEvidenceCache {
         const snap = runEvidenceStudy(sym, tf, candles);
         if (snap) this.entries.set(key, snap);
         return snap;
+      } catch {
+        return undefined;
       } finally {
         this.inflight.delete(key);
       }
@@ -96,5 +102,5 @@ export const getMiEvidenceCache = (): MiEvidenceCache => {
 export const warmMiEvidence = (deps: EvidenceDeps, symbols: readonly string[]): void => {
   if (!evidenceEnabled()) return;
   const tf = evidenceStudyTf();
-  for (const sym of symbols) void getMiEvidenceCache().refresh(deps, sym, tf);
+  for (const sym of symbols) void getMiEvidenceCache().refresh(deps, sym, tf).catch(() => undefined);
 };

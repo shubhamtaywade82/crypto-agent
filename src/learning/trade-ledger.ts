@@ -79,6 +79,8 @@ const excursionsInR = (
   return { adverse: Math.min(adverse, Math.abs(s.plannedRr + 1)), favorable };
 };
 
+const CLOSED_CAP = 2000;
+
 export class TradeLedger {
   private readonly open = new Map<string, OpenTrade>();
   private readonly closed: TradeOutcomeRecord[] = [];
@@ -115,6 +117,13 @@ export class TradeLedger {
       worstPrice: long ? payload.entry : payload.entry,
       bestPrice: payload.entry,
     });
+    if (this.open.size > 500) {
+      let dropped = 0;
+      for (const k of this.open.keys()) {
+        this.open.delete(k);
+        if (++dropped >= 100) break;
+      }
+    }
     if (persist && this.store) {
       this.store.append({ type: 'trade.opened', decisionId: payload.decisionId, symbol: payload.symbol, payload });
     }
@@ -174,6 +183,9 @@ export class TradeLedger {
     };
     this.open.delete(id);
     this.closed.push(record);
+    if (this.closed.length > CLOSED_CAP) {
+      this.closed.splice(0, this.closed.length - CLOSED_CAP);
+    }
     if (persist && this.store) {
       this.store.append({
         type: 'trade.closed', decisionId: id, symbol: s.symbol,

@@ -55,7 +55,9 @@ export class EventCouncil {
   wire(stream?: BinanceMarketStream): void {
     if (this.wired || !stream) return;
     this.wired = true;
-    stream.onCandleClose((symbol, timeframe) => { void this.onCandleClose(symbol, timeframe); });
+    stream.onCandleClose((symbol, timeframe) => {
+      void this.onCandleClose(symbol, timeframe).catch(() => undefined);
+    });
   }
 
   seedSnapshot(_symbol: string, _regime: string, _setupCount: number): void {
@@ -74,11 +76,11 @@ export class EventCouncil {
 
   async onCandleClose(symbol: string, timeframe: Timeframe): Promise<void> {
     if (!candleTfs().has(timeframe)) return;
-    const fresh = await this.scanMarketIntel(symbol, timeframe);
     try {
+      const fresh = await this.scanMarketIntel(symbol, timeframe);
       await getAlertRuntime(this.kernel).ingest(symbol, timeframe, fresh);
     } catch {
-      /* runtime may not be booted in unit tests */
+      /* network or runtime errors during candle close should not crash */
     }
   }
 
@@ -109,7 +111,11 @@ export class EventCouncil {
     const snap = this.kernel.marketStore.snapshot(symbol);
     const fromStore = snap?.candles[timeframe];
     if (fromStore && fromStore.length >= 20) return fromStore;
-    return this.kernel.provider.getKlines(symbol, timeframe, 300);
+    try {
+      return await this.kernel.provider.getKlines(symbol, timeframe, 300);
+    } catch {
+      return fromStore ?? [];
+    }
   }
 
   private async scanMarketIntel(symbol: string, timeframe: Timeframe): Promise<readonly MiFreshEvent[]> {

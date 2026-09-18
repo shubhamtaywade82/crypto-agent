@@ -13,6 +13,27 @@ const toCandle = (k: {
   openTime: k.openTime, open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume,
 });
 
+const isTransientNetwork = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('aborted') || msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') || msg.includes('socket hang up') ||
+    msg.includes('NetworkError');
+};
+
+const retryOnNetworkError = async <T>(fn: () => Promise<T>, attempts = 2): Promise<T> => {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientNetwork(err) || i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+    }
+  }
+  throw lastErr;
+};
+
 /**
  * Binance public market-data provider. Deliberately implements ONLY the
  * read-only IMarketDataProvider surface — no order, position or account
@@ -26,10 +47,12 @@ export class BinanceMarketDataProvider implements IMarketDataProvider {
   constructor(private readonly client: BinanceClient) {}
 
   async getKlines(symbol: string, timeframe: Timeframe, limit: number): Promise<Candle[]> {
-    const raw = await this.client.futures.market.klines(
-      symbol, FAPI_INTERVAL[timeframe], { limit }
-    );
-    return raw.map(toCandle);
+    return retryOnNetworkError(async () => {
+      const raw = await this.client.futures.market.klines(
+        symbol, FAPI_INTERVAL[timeframe], { limit }
+      );
+      return raw.map(toCandle);
+    });
   }
 
   async getTickerPrice(symbol: string): Promise<number> {

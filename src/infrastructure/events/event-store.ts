@@ -19,6 +19,7 @@ export interface EventStoreOptions {
    * instead of silently continuing without an audit trail.
    */
   readonly durable?: boolean;
+  readonly maxFileSizeBytes?: number;
 }
 
 export class EventPersistenceError extends Error {
@@ -51,8 +52,10 @@ const parseLine = (line: string): KernelEvent | undefined => {
 export class EventStore {
   private readonly filePath: string;
   private readonly durable: boolean;
+  private readonly maxFileSizeBytes: number;
   private readonly buffer: KernelEvent[] = [];
   private writeFailures = 0;
+  private writesSinceRotateCheck = 0;
   private lastWriteError?: string;
   private readonly listeners = new Set<(event: KernelEvent) => void>();
 
@@ -61,6 +64,8 @@ export class EventStore {
       typeof filePathOrOpts === 'string' ? { filePath: filePathOrOpts } : filePathOrOpts ?? {};
     const envDurable = process.env.EVENT_STORE_DURABLE === 'true';
     this.durable = opts.durable ?? envDurable;
+    this.maxFileSizeBytes = opts.maxFileSizeBytes ??
+      (process.env.EVENT_STORE_MAX_BYTES ? Number(process.env.EVENT_STORE_MAX_BYTES) : 52_428_800);
     this.filePath = opts.filePath ??
       path.join(process.env.EVENT_STORE_PATH ?? '.data', 'kernel-events.jsonl');
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
@@ -83,10 +88,30 @@ export class EventStore {
     return this.durable;
   }
 
+  private maybeRotate(): void {
+    try {
+      if (!fs.existsSync(this.filePath)) return;
+      const stat = fs.statSync(this.filePath);
+      if (stat.size <= this.maxFileSizeBytes) return;
+      const tail = this.readFileTail(10_000);
+      if (tail.length === 0) return;
+      const tmpPath = `${this.filePath}.tmp.${Date.now()}`;
+      fs.writeFileSync(tmpPath, `${tail.map((e) => JSON.stringify(e)).join('\n')}\n`, 'utf-8');
+      fs.renameSync(tmpPath, this.filePath);
+    } catch {
+      // Rotation failures must not crash the trading loop
+    }
+  }
+
   private write(full: KernelEvent): boolean {
     try {
       fs.appendFileSync(this.filePath, `${JSON.stringify(full)}\n`, 'utf-8');
       this.lastWriteError = undefined;
+      this.writesSinceRotateCheck++;
+      if (this.writesSinceRotateCheck >= 1000) {
+        this.writesSinceRotateCheck = 0;
+        this.maybeRotate();
+      }
       return true;
     } catch (err) {
       this.writeFailures++;

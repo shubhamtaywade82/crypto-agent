@@ -87,8 +87,8 @@ const MarketWatchPanel = ({ focusSymbol, scrollHint }: {
 }): React.JSX.Element => {
   const symbols = useMemo(() => kernelWatchSymbols(), []);
   useEffect(() => {
-    void ensureSymbolTracked(focusSymbol);
-    for (const sym of symbols) void ensureSymbolTracked(sym);
+    void ensureSymbolTracked(focusSymbol).catch(() => undefined);
+    for (const sym of symbols) void ensureSymbolTracked(sym).catch(() => undefined);
   }, [focusSymbol, symbols]);
   return (
     <Box flexDirection="column" gap={0} flexShrink={0}>

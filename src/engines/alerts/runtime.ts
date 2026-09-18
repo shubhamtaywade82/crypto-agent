@@ -125,7 +125,13 @@ export class AlertRuntime {
     const key = `${candidate.id}:${candidate.type}`;
     if (this.seenConfirm.has(key)) return;
     this.seenConfirm.add(key);
-    if (this.seenConfirm.size > 2000) this.seenConfirm.clear();
+    if (this.seenConfirm.size > 2000) {
+      let dropped = 0;
+      for (const k of this.seenConfirm) {
+        this.seenConfirm.delete(k);
+        if (++dropped >= 1000) break;
+      }
+    }
     if (macroBlocksNewRisk(sharedMacroPolicy)) return;
     const analysis = process.env.COUNCIL_LLM_ENABLED === 'false'
       ? undefined

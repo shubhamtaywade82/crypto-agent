@@ -23,11 +23,19 @@ const entryToTimelineItem = (e: TranscriptEntry): ActivityTimelineItem => {
   return { id: e.id, at: e.at, actor, level, summary: `${e.title}: ${e.lines[0] ?? ''}`, detail: e.lines.slice(1).join('\n') };
 };
 
+const samePositions = (a: readonly BrokerPosition[], b: readonly BrokerPosition[]): boolean =>
+  a.length === b.length && a.every((p, i) =>
+    p.pair === b[i]?.pair && p.size === b[i]?.size &&
+    p.side === b[i]?.side && p.entryPrice === b[i]?.entryPrice
+  );
+
 const usePositionsPoll = (): readonly BrokerPosition[] => {
   const [positions, setPositions] = useState<readonly BrokerPosition[]>([]);
   useEffect(() => {
     const fetchPositions = (): void => {
-      void getKernel().broker.getPositions().then(setPositions).catch(() => {});
+      void getKernel().broker.getPositions()
+        .then((fresh) => setPositions((prev) => (samePositions(prev, fresh) ? prev : fresh)))
+        .catch(() => {});
     };
     fetchPositions();
     const timer = setInterval(fetchPositions, 2000);

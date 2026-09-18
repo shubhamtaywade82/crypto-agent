@@ -77,6 +77,13 @@ export class SetupTracker {
       if (phase === 'CONFIRMED') confirmed = c;
     }
     await this.expireMissing(state, seen, close5m, openSymbols);
+    if (this.mem.size > 500) {
+      let dropped = 0;
+      for (const k of this.mem.keys()) {
+        this.mem.delete(k);
+        if (++dropped >= 200) break;
+      }
+    }
     return confirmed;
   }
 

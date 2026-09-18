@@ -107,6 +107,17 @@ describe('TradeLedger — feature snapshots to attributed outcomes', () => {
     expect(ledger.outcomesForCell('S1|RANGE')).toHaveLength(1);
     expect(ledger.outcomesForCell('S1|NOPE')).toHaveLength(0);
   });
+
+  it('caps closed outcomes to 2000 to prevent unbounded heap growth', () => {
+    const ledger = new TradeLedger();
+    for (let i = 0; i < 2100; i++) {
+      ledger.recordOpened(snapshot({ decisionId: `d-${i}` }));
+      ledger.recordClosed(`d-${i}`, 10);
+    }
+    expect(ledger.outcomes).toHaveLength(2000);
+    expect(ledger.outcomes[0]!.decisionId).toBe('d-100');
+    expect(ledger.outcomes[1999]!.decisionId).toBe('d-2099');
+  });
 });
 
 describe('Cell statistics — expectancy, dispersion, significance', () => {

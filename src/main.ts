@@ -112,6 +112,13 @@ const main = async (): Promise<void> => {
   await startInteractiveRepl();
 };
 
+process.on('unhandledRejection', (reason: unknown): void => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  if (process.env.LOG_LEVEL === 'debug') {
+    process.stderr.write(`[warn] unhandled rejection: ${msg}\n`);
+  }
+});
+
 main().catch((err: unknown) => {
   process.stderr.write(`Fatal error: ${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);

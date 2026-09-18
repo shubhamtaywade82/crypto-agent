@@ -103,6 +103,13 @@ export class NotificationEngine {
     const dup = this.transitionReject(event);
     if (dup) return { action: 'suppressed', reason: dup, event };
     this.memory.set(event.fingerprint, { stateTo: event.stateTo, at: event.at || this.now() });
+    if (this.memory.size > 2000) {
+      let dropped = 0;
+      for (const k of this.memory.keys()) {
+        this.memory.delete(k);
+        if (++dropped >= 1000) break;
+      }
+    }
     return { action: 'emitted', event };
   }
 

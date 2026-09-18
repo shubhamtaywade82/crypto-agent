@@ -68,4 +68,17 @@ describe('EventStore — durability contract', () => {
     const fresh = new EventStore({ filePath, durable: false });
     expect(fresh.readAll(5).map((e) => (e.payload as { equity: number }).equity)).toEqual([1195, 1196, 1197, 1198, 1199]);
   });
+
+  it('rotates file when exceeding maxFileSizeBytes and 1000 writes check', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'evrot-'));
+    const filePath = join(dir, 'events.jsonl');
+    const store = new EventStore({ filePath, durable: false, maxFileSizeBytes: 10_000 });
+    for (let i = 0; i < 1005; i++) {
+      store.append({ type: 'portfolio.equity', payload: { equity: i, padding: 'x'.repeat(50) } });
+    }
+    const fresh = new EventStore({ filePath, durable: false });
+    const all = fresh.readAll(5);
+    expect(all).toHaveLength(5);
+    expect((all[4]!.payload as { equity: number }).equity).toBe(1004);
+  });
 });

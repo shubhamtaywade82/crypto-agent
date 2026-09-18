@@ -42,13 +42,17 @@ export const hydrateWatchMicro = async (): Promise<void> => {
 
 /** Subscribe on the WS multiplexer (reconnect if needed) and REST-fill depth/tape. */
 export const ensureSymbolTracked = async (symbol: string): Promise<boolean> => {
-  const kernel = getKernel();
-  const sym = symbol.toUpperCase();
-  await kernel.streams.market?.ensure(sym);
-  if ((kernel.marketStore.peekBook(sym)?.bids.length ?? 0) === 0) {
-    await hydrateSymbolMicro(kernel.provider, kernel.marketStore, sym);
+  try {
+    const kernel = getKernel();
+    const sym = symbol.toUpperCase();
+    await kernel.streams.market?.ensure(sym);
+    if ((kernel.marketStore.peekBook(sym)?.bids.length ?? 0) === 0) {
+      await hydrateSymbolMicro(kernel.provider, kernel.marketStore, sym);
+    }
+    return (kernel.marketStore.peekBook(sym)?.bids.length ?? 0) > 0;
+  } catch {
+    return false;
   }
-  return (kernel.marketStore.peekBook(sym)?.bids.length ?? 0) > 0;
 };
 
 const TAPE_STALE_MS = 2_500;

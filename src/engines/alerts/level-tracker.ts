@@ -51,6 +51,15 @@ export const inferBreakout = (args: {
 
 const bucket = (price: number): string => price.toFixed(2);
 
+const pruneMap = (map: Map<string, unknown>, max: number, drop: number): void => {
+  if (map.size <= max) return;
+  let dropped = 0;
+  for (const k of map.keys()) {
+    map.delete(k);
+    if (++dropped >= drop) break;
+  }
+};
+
 export class LevelTracker {
   private readonly levels = new Map<string, TrackedLevel>();
   private readonly breakouts = new Map<string, BreakoutPhase>();
@@ -81,6 +90,7 @@ export class LevelTracker {
     const dist = distancePct(price, level);
     const band = nextBand(dist, prev);
     this.levels.set(id, { kind, price: level, band });
+    pruneMap(this.levels, 500, 200);
     if (band === prev) return;
     if (band === 'FAR') return;
     await this.dispatcher.publish(makeAlert({
@@ -114,6 +124,7 @@ export class LevelTracker {
       prev,
     });
     this.breakouts.set(id, next);
+    pruneMap(this.breakouts, 500, 200);
     if (next === prev || next === 'NONE') return;
     const title = next === 'WATCH' ? 'BREAKOUT WATCH' : next === 'CONFIRMED' ? 'BREAKOUT CONFIRMED' : 'FAILED BREAKOUT';
     await this.dispatcher.publish(makeAlert({
