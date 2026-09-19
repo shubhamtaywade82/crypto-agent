@@ -40,6 +40,14 @@ export interface OverviewViewProps {
 const TOTAL_VIEW_HEIGHT = 38;
 const SCROLL_STEP = 3;
 
+/** Row count for the adaptive list panels (depth ladder, tape, console feed). Shrinks
+ * on short terminals so total content never exceeds the workspace box and gets clipped. */
+const adaptiveListRows = (height: number): number => {
+  if (height >= 26) return 5;
+  if (height >= 22) return 4;
+  return 3;
+};
+
 export const computeScrollY = (
   selectedIndex: number,
   viewportH: number
@@ -51,14 +59,14 @@ export const computeScrollY = (
   return { scrollY, maxScroll, maxIdx };
 };
 
-const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => {
+const DepthAndTape = ({ symbol, rows }: { readonly symbol: string; readonly rows: number }): React.JSX.Element => {
   const book = getKernel().marketStore.peekBook(symbol);
   return (
     <Box flexDirection="row" marginTop={0} flexShrink={0}>
       <Box width="50%" flexDirection="column" paddingRight={1} flexShrink={0}>
         <Text bold color="yellow">Depth ({symbol})</Text>
         {book?.bids.length ? (
-          <DepthLadder bids={book.bids} asks={book.asks} last={book.last} mark={book.mark} micro={book.microstructure} symbol={symbol} />
+          <DepthLadder bids={book.bids} asks={book.asks} last={book.last} mark={book.mark} micro={book.microstructure} symbol={symbol} levels={rows} />
         ) : <Text color="gray">depth streaming…</Text>}
       </Box>
       <Box
@@ -75,15 +83,16 @@ const DepthAndTape = ({ symbol }: { readonly symbol: string }): React.JSX.Elemen
       >
         <Text bold color="yellow">Tape ({symbol})</Text>
         <Text color="gray">WS aggTrade + REST refresh</Text>
-        <LiveTape symbol={symbol} />
+        <LiveTape symbol={symbol} limit={rows} />
       </Box>
     </Box>
   );
 };
 
-const MarketWatchPanel = ({ focusSymbol, scrollHint }: {
+const MarketWatchPanel = ({ focusSymbol, scrollHint, rows }: {
   readonly focusSymbol: string;
   readonly scrollHint?: string;
+  readonly rows: number;
 }): React.JSX.Element => {
   const symbols = useMemo(() => kernelWatchSymbols(), []);
   useEffect(() => {
@@ -100,7 +109,7 @@ const MarketWatchPanel = ({ focusSymbol, scrollHint }: {
         </Text>
       </Box>
       <LiveLtpTable hideHeader />
-      <DepthAndTape symbol={focusSymbol} />
+      <DepthAndTape symbol={focusSymbol} rows={rows} />
     </Box>
   );
 };
@@ -196,29 +205,33 @@ const OverviewMainContent = ({
   p,
   brief,
   scrollHint,
+  rows,
 }: {
   readonly p: OverviewViewProps;
   readonly brief: ReturnType<typeof buildTraderBrief>;
   readonly scrollHint?: string;
+  readonly rows: number;
 }): React.JSX.Element => (
   <>
     <TraderBriefPanel brief={brief} />
     <Divider style="single" />
     <Box flexDirection="row" gap={1} flexShrink={0}>
       <Box flexDirection="column" flexGrow={1} minWidth={40} flexShrink={0}>
-        <AgentConsoleFeed entries={p.transcript ?? []} scrollOffset={0} autoScroll={p.autoEnabled ?? true} limit={5} />
+        <AgentConsoleFeed entries={p.transcript ?? []} scrollOffset={0} autoScroll={p.autoEnabled ?? true} limit={rows} />
       </Box>
       <OverviewSidebar positions={p.positions} opportunities={p.opportunities} isScanning={p.isScanning} streamLive={p.streamLive} port={p.port} />
     </Box>
     <Divider style="single" />
-    <MarketWatchPanel focusSymbol={p.focusSymbol} scrollHint={scrollHint} />
+    <MarketWatchPanel focusSymbol={p.focusSymbol} scrollHint={scrollHint} rows={rows} />
   </>
 );
 
 export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
   useLiveTick();
   const brief = buildTraderBrief(p.focusSymbol, p.pipelineSnapshots ?? {}, p.opportunities);
-  const { scrollY, maxScroll, maxIdx } = computeScrollY(p.selectedIndex, p.height ?? 24);
+  const height = p.height ?? 24;
+  const { scrollY, maxScroll, maxIdx } = computeScrollY(p.selectedIndex, height);
+  const rows = adaptiveListRows(height);
 
   useEffect(() => {
     if (p.selectedIndex > maxIdx && maxIdx >= 0) p.setSelectedIndex?.(maxIdx);
@@ -228,7 +241,7 @@ export const OverviewView = (p: OverviewViewProps): React.JSX.Element => {
 
   return (
     <Box flexDirection="column" gap={0} flexShrink={0} marginTop={-scrollY}>
-      <OverviewMainContent p={p} brief={brief} scrollHint={hint} />
+      <OverviewMainContent p={p} brief={brief} scrollHint={hint} rows={rows} />
     </Box>
   );
 };

@@ -1,6 +1,7 @@
 import { getKernel } from '../kernel.js';
 import { deriveCircuitState } from '../domain/risk/risk-config.js';
 import type { PipelineTrace } from '../engines/pipeline.js';
+import { regimeGates } from '../engines/setup-engine.js';
 import type { ScanOpportunity } from './scan-opportunities.js';
 import { mtfTrendLine, pipelineAge, topSetup, traceForSymbol, type PipelineSnapshots } from './pipeline-view.js';
 import { fmtPrice } from './KernelDashboard.js';
@@ -48,7 +49,11 @@ const riskBlocked = (circuit: string, halted: boolean, openSlots: number): strin
 
 const triggerLine = (trace: PipelineTrace, price: number): string | null => {
   const setup = topSetup(trace);
-  if (!setup) return trace.outcome?.action === 'WAIT' ? 'Await valid setup on next scan' : null;
+  if (!setup) {
+    if (trace.outcome?.action === 'WAIT') return 'Await valid setup on next scan';
+    if (trace.setups.length === 0) return 'No trigger — waiting for a qualifying setup on next scan';
+    return null;
+  }
   const dist = ((setup.entry - price) / price) * 100;
   const side = setup.direction === 'LONG' ? 'bid' : 'offer';
   const distLabel = Math.abs(dist) < 0.05 ? 'at market' : `${dist > 0 ? '+' : ''}${dist.toFixed(2)}% from mark`;
@@ -67,6 +72,25 @@ const microConflict = (trace: PipelineTrace): string | null => {
     return `Micro flow BUY vs SHORT thesis — spread ${micro.spreadBps.toFixed(1)} bps, imb ${(micro.imbalance * 100).toFixed(0)}%`;
   }
   return null;
+};
+
+/** Why zero setups fired: reuse the same regime gates the detectors were run under
+ * instead of guessing "regime unclear" when the regime is in fact known. */
+const noSetupReason = (trace: PipelineTrace): string => {
+  const state = trace.state;
+  const rejected = trace.rejectedSetup;
+  if (rejected) {
+    return rejected.rr > 0
+      ? `Closest setup ${rejected.type} ${rejected.direction} — RR ${rejected.rr.toFixed(2)} fell short of the required hurdle`
+      : `Closest setup ${rejected.type} ${rejected.direction} — stop/target structure invalid at current price`;
+  }
+  if (!state) return 'No valid setups — regime unclear or R:R below hurdle';
+  const gates = regimeGates(state);
+  if (gates.btcBlocks) return 'BTC in PANIC — long and short setups suppressed until it clears';
+  if (gates.blocksLongs && gates.blocksShorts) return `${state.regime} regime — long and short setups both suppressed`;
+  if (gates.blocksLongs) return `${state.regime} regime blocks longs; no qualifying short structure found`;
+  if (gates.blocksShorts) return `${state.regime} regime blocks shorts; no qualifying long structure found`;
+  return `${state.regime} regime — no structural setup cleared the R:R hurdle`;
 };
 
 const stanceFromTrace = (trace: PipelineTrace, riskOk: boolean): { stance: TraderStance; headline: string } => {
@@ -93,16 +117,17 @@ const stanceFromTrace = (trace: PipelineTrace, riskOk: boolean): { stance: Trade
     return { stance: s, headline: ready ? `${setup.direction} approved` : `${setup.direction} candidate — pending gate` };
   }
   if (setup?.valid) return { stance: 'MONITOR', headline: `${setup.type} forming — ${setup.thesis}` };
-  if (trace.setups.length === 0) return { stance: 'WAIT', headline: 'No valid setups — regime unclear or R:R below hurdle' };
+  if (trace.setups.length === 0) return { stance: 'WAIT', headline: noSetupReason(trace) };
   return { stance: 'WAIT', headline: `Pipeline ${trace.status}` };
 };
 
 const levelsFrom = (trace: PipelineTrace): TraderLevels => {
-  const setup = topSetup(trace);
+  const setup = topSetup(trace) ?? trace.rejectedSetup;
   const analysis = trace.analysis;
+  const liquidity = trace.state?.liquidity;
   return {
-    support: analysis?.keyLevels.support,
-    resistance: analysis?.keyLevels.resistance,
+    support: analysis?.keyLevels.support ?? liquidity?.nearestLow,
+    resistance: analysis?.keyLevels.resistance ?? liquidity?.nearestHigh,
     entry: setup?.entry,
     stop: setup?.stopLoss,
     target: setup?.takeProfit,
@@ -163,7 +188,8 @@ const buildTraceBrief = (
     setup: setup?.type ?? null,
     regime: trace.regime,
     mtf: mtfTrendLine(trace.state),
-    thesis: trace.outcome?.thesis ?? setup?.thesis ?? trace.analysis?.summary ?? null,
+    thesis: trace.outcome?.thesis ?? setup?.thesis ?? trace.analysis?.summary
+      ?? (trace.setups.length === 0 ? noSetupReason(trace) : null),
     trigger: triggerLine(trace, risk.last || setup?.entry || 0),
     invalidation: trace.outcome?.invalidation ?? setup?.invalidation ?? null,
     levels: levelsFrom(trace),

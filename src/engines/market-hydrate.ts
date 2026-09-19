@@ -71,3 +71,22 @@ export const refreshSymbolTape = async (symbol: string): Promise<void> => {
     /* REST tape refresh is best-effort */
   }
 };
+
+/** Poll REST ticker/mark so LTP/MARK keep moving if the WS ticker/markPrice
+ * streams go quiet (e.g. Binance serving depth/bookTicker but not aggTrade/
+ * markPrice/miniTicker) — mirrors refreshSymbolTape's fallback for trades. */
+export const refreshSymbolQuote = async (symbol: string): Promise<void> => {
+  const kernel = getKernel();
+  const sym = symbol.toUpperCase();
+  try {
+    const [price, markIndex] = await Promise.all([
+      kernel.provider.getTickerPrice(sym),
+      kernel.provider.getMarkIndex(sym),
+    ]);
+    const at = Date.now();
+    kernel.marketStore.setTicker({ symbol: sym, price, at });
+    kernel.marketStore.setMarkIndex({ symbol: sym, mark: markIndex.mark, index: markIndex.index, at });
+  } catch {
+    /* REST quote refresh is best-effort */
+  }
+};

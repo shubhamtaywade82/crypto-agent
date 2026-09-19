@@ -10,12 +10,13 @@ const tradeKey = (t: TradePrint, i: number): string => `${t.at}:${t.price}:${t.q
 const fmtTime = (at: number): string =>
   new Date(at).toLocaleTimeString('en-IN', { hour12: false });
 
-const TapeRows = ({ trades, symbol }: {
+const TapeRows = ({ trades, symbol, limit }: {
   readonly trades: readonly TradePrint[];
   readonly symbol: string;
+  readonly limit: number;
 }): React.JSX.Element => (
   <Box flexDirection="column">
-    {trades.slice(-8).reverse().map((t, i) => (
+    {trades.slice(-limit).reverse().map((t, i) => (
       <Text key={tradeKey(t, i)} color={t.buyerIsMaker ? 'red' : 'green'}>
         {fmtTime(t.at)} {t.buyerIsMaker ? 'S' : 'B'} {t.qty.toFixed(3)} @ {fmtPrice(t.price, symbol)}
       </Text>
@@ -49,6 +50,6 @@ export const useLiveTrades = (symbol: string): readonly TradePrint[] => {
   return view.trades;
 };
 
-export const LiveTape = ({ symbol }: { readonly symbol: string }): React.JSX.Element => (
-  <TapeRows trades={useLiveTrades(symbol)} symbol={symbol} />
+export const LiveTape = ({ symbol, limit = 8 }: { readonly symbol: string; readonly limit?: number }): React.JSX.Element => (
+  <TapeRows trades={useLiveTrades(symbol)} symbol={symbol} limit={limit} />
 );

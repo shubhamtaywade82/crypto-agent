@@ -222,32 +222,63 @@ const shortDetectors: readonly ((
  * Only structurally valid candidates (RR >= min) are returned, sorted by
  * confidence descending. Regime gates: no longs in TREND_DOWN etc.
  */
-export const detectSetups = (
+export interface RegimeGates {
+  readonly blocksLongs: boolean;
+  readonly blocksShorts: boolean;
+  readonly btcBlocks: boolean;
+}
+
+/** Which directions the current regime rules out before any detector runs. */
+export const regimeGates = (state: MarketState): RegimeGates => ({
+  blocksLongs: state.regime === 'TREND_DOWN' || state.regime === 'PANIC',
+  blocksShorts: state.regime === 'TREND_UP' || state.regime === 'PANIC',
+  btcBlocks: state.btcRegime === 'PANIC',
+});
+
+/** Run every detector under the current regime gates; includes invalid (rr-short) candidates. */
+const collectCandidates = (
   mtf: MtfResult,
   limits: RiskLimits,
-  circuit: CircuitState = 'NORMAL'
+  circuit: CircuitState
 ): readonly SetupCandidate[] => {
   const state = mtf.state;
-  const regimeBlocksLongs = state.regime === 'TREND_DOWN' || state.regime === 'PANIC';
-  const regimeBlocksShorts = state.regime === 'TREND_UP' || state.regime === 'PANIC';
-  const btcBlocks = state.btcRegime === 'PANIC';
+  const gates = regimeGates(state);
 
   const candidates: SetupCandidate[] = [];
   const run = (
     fns: readonly ((state: MarketState, mtf: MtfResult) => RawSetup | null)[],
     blocked: boolean
   ): void => {
-    if (blocked || btcBlocks) return;
+    if (blocked || gates.btcBlocks) return;
     for (const fn of fns) {
       const raw = fn(state, mtf);
       if (raw) candidates.push(finalize(state, raw, limits, circuit));
     }
   };
-  run(detectors, regimeBlocksLongs);
-  run(shortDetectors, regimeBlocksShorts);
+  run(detectors, gates.blocksLongs);
+  run(shortDetectors, gates.blocksShorts);
+  return candidates;
+};
 
-  return candidates
+export const detectSetups = (
+  mtf: MtfResult,
+  limits: RiskLimits,
+  circuit: CircuitState = 'NORMAL'
+): readonly SetupCandidate[] =>
+  collectCandidates(mtf, limits, circuit)
     .filter((c) => c.valid)
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 3);
+
+/** Best structurally-detected candidate that missed the R:R hurdle — for
+ * explaining a "no valid setups" result, not for trading on. */
+export const bestRejectedSetup = (
+  mtf: MtfResult,
+  limits: RiskLimits,
+  circuit: CircuitState = 'NORMAL'
+): SetupCandidate | null => {
+  const rejected = collectCandidates(mtf, limits, circuit)
+    .filter((c) => !c.valid)
+    .sort((a, b) => b.rr - a.rr);
+  return rejected[0] ?? null;
 };

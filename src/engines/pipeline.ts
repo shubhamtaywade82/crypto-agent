@@ -7,7 +7,7 @@ import { type RiskDecision, rejected } from '../domain/risk/risk-decision.js';
 import { type SizingResult, sizePosition, failedSizing } from './position-sizer.js';
 import { evaluateRisk } from './risk-engine.js';
 import { buildMarketState, buildMtfFromStore } from './market-state-engine.js';
-import { detectSetups, type SetupCandidate } from './setup-engine.js';
+import { detectSetups, bestRejectedSetup, type SetupCandidate } from './setup-engine.js';
 import { stageExecution } from './pipeline-stage.js';
 export { stageExecution };
 import type { MtfResult } from './mtf-engine.js';
@@ -84,6 +84,8 @@ export interface PipelineTrace {
   readonly state?: MarketState;
   readonly analysis?: MarketAnalysis;
   readonly setups: readonly SetupCandidate[];
+  /** Best structurally-detected candidate that missed the R:R hurdle; explains a NO_SETUPS result. */
+  readonly rejectedSetup?: SetupCandidate;
   readonly outcome?: StrategyOutcome;
   readonly proposal?: TradeProposal;
   readonly validation?: ValidationResult;
@@ -180,10 +182,15 @@ export const runTradingPipeline = async (
     const circuit = deriveCircuitState(portfolio.dailyLossPercent, portfolio.drawdownPercent, portfolio.lossStreak, deps.limits);
     const { mtf, setups } = await gatherMarketContext(deps, symbol, circuit);
     const state = mtf.state;
+    if (setups.length === 0) {
+      const rejectedSetup = bestRejectedSetup(mtf, deps.limits, circuit) ?? undefined;
+      return {
+        symbol, ranAt: Date.now(), status: 'NO_SETUPS', regime: state.regime, state, setups, rejectedSetup,
+      };
+    }
     const base: PipelineTrace = {
       symbol, ranAt: Date.now(), status: 'NO_SETUPS', regime: state.regime, state, setups,
     };
-    if (setups.length === 0) return base;
 
     const evidence = deps.getEvidence ? await deps.getEvidence(symbol) : undefined;
     const analysis = await deps.analyze(state, evidence);

@@ -146,6 +146,8 @@ export interface DepthLadderProps {
   readonly mark?: number;
   readonly micro?: MicrostructureView;
   readonly symbol?: string;
+  /** Row count for the ladder; shrinks on short terminals to avoid overflow. */
+  readonly levels?: number;
 }
 
 const DepthLevelRow = ({ bid, ask, sep, symbol }: {
@@ -169,9 +171,10 @@ const DepthLevelRow = ({ bid, ask, sep, symbol }: {
   );
 };
 
-export const DepthLadder = ({ bids, asks, last, mark, micro, symbol }: DepthLadderProps): React.JSX.Element => {
-  const topBids = bids.slice(0, DEPTH_LEVELS);
-  const topAsks = asks.slice(0, DEPTH_LEVELS);
+export const DepthLadder = ({ bids, asks, last, mark, micro, symbol, levels }: DepthLadderProps): React.JSX.Element => {
+  const depthLevels = levels ?? DEPTH_LEVELS;
+  const topBids = bids.slice(0, depthLevels);
+  const topAsks = asks.slice(0, depthLevels);
   const mid = topBids[0] && topAsks[0] ? (topBids[0].price + topAsks[0].price) / 2 : undefined;
   const effectiveLast = last ?? mid;
   const effectiveMark = mark ?? effectiveLast;

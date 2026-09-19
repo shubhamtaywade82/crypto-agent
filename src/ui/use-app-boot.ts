@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { getKernel } from '../kernel.js';
 import { bootEventCouncil } from '../engines/event-council.js';
-import { hydrateWatchMicro } from '../engines/market-hydrate.js';
+import { hydrateWatchMicro, refreshSymbolQuote } from '../engines/market-hydrate.js';
+import { kernelWatchSymbols } from '../kernel-streams.js';
 
 const isStreamLive = (): boolean => getKernel().streams.market?.status().state === 'LIVE';
+
+const QUOTE_REFRESH_EVERY_TICKS = 5;
 
 export const useStreamBoot = (): boolean => {
   const [live, setLive] = useState(false);
@@ -14,7 +17,14 @@ export const useStreamBoot = (): boolean => {
       .then(() => { bootEventCouncil(kernel); return hydrateWatchMicro(); })
       .then(() => setLive(isStreamLive()))
       .catch(() => setLive(false));
-    const poll = setInterval(() => { setLive(isStreamLive()); }, 1000);
+    let ticks = 0;
+    const poll = setInterval(() => {
+      setLive(isStreamLive());
+      ticks += 1;
+      if (ticks % QUOTE_REFRESH_EVERY_TICKS === 0) {
+        for (const sym of kernelWatchSymbols()) void refreshSymbolQuote(sym);
+      }
+    }, 1000);
     return (): void => {
       clearInterval(poll);
       kernel.reconciler.stop();
