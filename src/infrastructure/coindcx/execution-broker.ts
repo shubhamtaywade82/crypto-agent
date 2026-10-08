@@ -7,7 +7,8 @@ import type {
   BrokerBalance, BrokerLookupResult, BrokerOrder, BrokerPosition, IExecutionBroker, PlaceOrderRequest,
 } from '../broker/broker.js';
 import type { ContractSpec } from '../../domain/futures/contract-spec.js';
-import { specFromInstrument } from '../../domain/futures/contract-spec.js';
+import { alignToTick } from '../../domain/futures/contract-spec.js';
+import { fetchFuturesInstrument, mergeSpec, pickMarketRow } from './contract-registry.js';
 import { FxRateCache } from '../../domain/portfolio/valuation.js';
 import type { OrderStatus } from '../../domain/orders/order-state.js';
 
@@ -24,6 +25,11 @@ export interface CoinDCXBrokerOptions {
   readonly fxFreshMs?: number;
   readonly fxStaleMs?: number;
 }
+
+/** Bounded wait for the public futures-instrument endpoint: a hang must fail the lookup, not stall the pipeline. */
+const INSTRUMENT_TIMEOUT_MS = 10_000;
+/** Tick sizes change rarely; re-read at the registry's cadence instead of on every order. */
+const TICK_TTL_MS = 5 * 60_000;
 
 const mapStatus = (raw: string): OrderStatus => {
   switch (raw) {
@@ -71,6 +77,7 @@ export class CoinDCXExecutionBroker implements IExecutionBroker {
   private readonly fx?: () => Promise<number>;
   /** USDT/INR rate cache with explicit freshness policy (never forever-cached). */
   private readonly fxCache: FxRateCache;
+  private readonly tickCache = new Map<string, { readonly tick: number; readonly at: number }>();
 
   constructor(client: CoinDCXClient, opts: CoinDCXBrokerOptions = {}) {
     this.client = client;
@@ -102,15 +109,43 @@ export class CoinDCXExecutionBroker implements IExecutionBroker {
   }
 
   /**
-   * Instrument metadata. NOTE: failures propagate to the caller — the
-   * ContractRegistry classifies them. A network/auth/rate-limit error
-   * must NEVER degrade into a synthetic fallback spec here: fallback
-   * specs are only safe for "known missing metadata", never for
-   * "unknown exchange state".
+   * Venue spec = the stricter-of-both merge of markets_details and the futures
+   * instrument. Returns undefined only when markets_details does not list the
+   * pair; every failure throws, and the ContractRegistry classifies it. The SDK's
+   * getInstrumentDetails is bypassed on purpose: for a pair missing from
+   * markets_details it fabricates an object whose constraints are undefined.
    */
   async getInstrument(pair: string): Promise<ContractSpec | undefined> {
-    const inst = await this.client.futures.market.getInstrumentDetails(pair);
-    return inst ? specFromInstrument({ ...inst, pair }) : undefined;
+    const market = pickMarketRow(await this.client.futures.market.getMarketsDetails(), pair);
+    if (!market) return undefined;
+    const futures = await fetchFuturesInstrument(pair, INSTRUMENT_TIMEOUT_MS);
+    return mergeSpec(pair, market, futures);
+  }
+
+  /** Venue tick for a pair. An unknown instrument throws, so no unaligned price is ever sent. */
+  private async tickSizeFor(pair: string): Promise<number> {
+    const cached = this.tickCache.get(pair);
+    if (cached && Date.now() - cached.at < TICK_TTL_MS) return cached.tick;
+    const spec = await this.getInstrument(pair);
+    if (!spec) throw new Error(`instrument ${pair} unknown at CoinDCX: cannot align order price`);
+    this.tickCache.set(pair, { tick: spec.tickSize, at: Date.now() });
+    return spec.tickSize;
+  }
+
+  /**
+   * Worst price a guarded market order may fill at, snapped to the venue tick
+   * toward the expected price (buy floors, sell ceils). Snapping outward would
+   * put the limit beyond the slippage band the execution contract promised.
+   */
+  private async toleratedLimitUsdt(
+    pair: string,
+    side: 'buy' | 'sell',
+    expectedPrice: number,
+    maxSlippageBps: number
+  ): Promise<number> {
+    const bps = maxSlippageBps / 10_000;
+    const worst = side === 'buy' ? expectedPrice * (1 + bps) : expectedPrice * (1 - bps);
+    return alignToTick(worst, await this.tickSizeFor(pair), side === 'buy' ? 'LONG' : 'SHORT');
   }
 
   async setLeverage(pair: string, leverage: number): Promise<void> {
@@ -133,10 +168,9 @@ export class CoinDCXExecutionBroker implements IExecutionBroker {
     if (req.orderType === 'market_order' &&
       req.expectedPrice !== undefined && req.maxSlippageBps !== undefined &&
       req.maxSlippageBps > 0) {
-      const bps = req.maxSlippageBps / 10_000;
-      const worstUsdt = req.side === 'buy'
-        ? req.expectedPrice * (1 + bps)
-        : req.expectedPrice * (1 - bps);
+      const worstUsdt = await this.toleratedLimitUsdt(
+        req.pair, req.side, req.expectedPrice, req.maxSlippageBps
+      );
       orderType = 'limit_order';
       price = await this.convertPrice(req.pair, worstUsdt);
       timeInForce = 'ioc';

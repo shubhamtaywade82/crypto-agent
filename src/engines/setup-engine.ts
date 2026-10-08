@@ -16,11 +16,27 @@ type RawSetup = {
   readonly invalidation: string;
 };
 
-export type SetupType =
-  | 'PULLBACK_RECLAIM'
-  | 'LIQUIDITY_SWEEP_REVERSAL'
-  | 'BREAKOUT_RETEST'
-  | 'TREND_CONTINUATION';
+/** Every setup the engine can emit. ENABLED_SETUPS may only narrow this list. */
+export const SETUP_TYPES = [
+  'PULLBACK_RECLAIM',
+  'LIQUIDITY_SWEEP_REVERSAL',
+  'BREAKOUT_RETEST',
+  'TREND_CONTINUATION',
+] as const;
+
+export type SetupType = (typeof SETUP_TYPES)[number];
+
+export const isSetupType = (value: string): value is SetupType => SETUP_TYPES.some((t) => t === value);
+
+/** Fail-closed allowlist: a typo must never silently trade a different set than configured. */
+export const parseEnabledSetups = (raw: string | undefined): readonly SetupType[] => {
+  if (raw === undefined || raw.trim() === '') return SETUP_TYPES;
+  const names = raw.split(',').map((n) => n.trim()).filter((n) => n.length > 0);
+  const unknown = names.filter((n) => !isSetupType(n));
+  if (unknown.length > 0) throw new Error(`ENABLED_SETUPS names unknown setup(s): ${unknown.join(', ')}`);
+  if (names.length === 0) throw new Error('ENABLED_SETUPS lists no setups');
+  return SETUP_TYPES.filter((t) => names.includes(t));
+};
 
 export interface SetupCandidate {
   readonly id: string;

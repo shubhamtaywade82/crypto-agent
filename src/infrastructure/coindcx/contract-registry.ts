@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IExecutionBroker } from '../broker/broker.js';
 import type { ContractSpec } from '../../domain/futures/contract-spec.js';
 
@@ -141,3 +142,123 @@ export class ContractRegistry {
     }
   }
 }
+
+/**
+ * CoinDCX publishes two instrument sources that disagree. `markets_details`
+ * carries spot-style step/min/max; the futures instrument carries the
+ * perpetual's tick, leverage and notional rules. Neither is complete alone,
+ * so every shared constraint takes the stricter of the two venue values.
+ */
+
+const FUTURES_INSTRUMENT_URL = 'https://api.coindcx.com/exchange/v1/derivatives/futures/data/instrument';
+const MARGIN_CURRENCY = 'USDT';
+/** Absent from both venue payloads; sizing and risk never read it. Kept only for ContractSpec shape. */
+const MAINTENANCE_MARGIN_RATE_UNVERIFIED = 0.005;
+
+const marketRowSchema = z.object({
+  pair: z.string(),
+  status: z.string(),
+  step: z.number().positive(),
+  min_quantity: z.number().positive(),
+  max_quantity: z.number().positive(),
+  min_notional: z.number().nonnegative(),
+});
+
+const futuresInstrumentSchema = z.object({
+  pair: z.string(),
+  status: z.string(),
+  kind: z.string(),
+  margin_currency_short_name: z.string(),
+  position_currency_short_name: z.string(),
+  price_increment: z.number().positive(),
+  quantity_increment: z.number().positive(),
+  min_quantity: z.number().positive(),
+  max_quantity: z.number().positive(),
+  min_notional: z.number().nonnegative(),
+  max_leverage_long: z.number().min(1),
+  max_leverage_short: z.number().min(1),
+});
+
+const futuresResponseSchema = z.object({ instrument: futuresInstrumentSchema });
+
+export type MarketRow = z.infer<typeof marketRowSchema>;
+export type FuturesInstrument = z.infer<typeof futuresInstrumentSchema>;
+
+/**
+ * Public endpoint, no credentials. Timeouts, non-2xx responses and schema
+ * mismatches throw; the ContractRegistry classifies them as LOOKUP_FAILED.
+ */
+export const fetchFuturesInstrument = async (
+  pair: string,
+  timeoutMs: number
+): Promise<FuturesInstrument> => {
+  const url = new URL(FUTURES_INSTRUMENT_URL);
+  url.searchParams.set('pair', pair);
+  url.searchParams.set('margin_currency_short_name', MARGIN_CURRENCY);
+  const res = await fetch(url, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`futures instrument ${pair} HTTP ${res.status}`);
+  const parsed = futuresResponseSchema.safeParse(await res.json());
+  if (!parsed.success) {
+    throw new Error(`futures instrument ${pair} failed schema validation: ${parsed.error.message}`);
+  }
+  if (parsed.data.instrument.pair !== pair) {
+    throw new Error(`futures instrument returned ${parsed.data.instrument.pair} for ${pair}`);
+  }
+  return parsed.data.instrument;
+};
+
+const pairOf = (row: unknown): unknown =>
+  typeof row === 'object' && row !== null && 'pair' in row ? row.pair : undefined;
+
+/**
+ * markets_details is an unindexed list of every market. `undefined` means the
+ * venue does not list the pair (an affirmative "unknown"), not a lookup error.
+ */
+export const pickMarketRow = (rows: unknown, pair: string): MarketRow | undefined => {
+  if (!Array.isArray(rows)) throw new Error('markets_details payload is not an array');
+  const row: unknown = rows.find((candidate: unknown) => pairOf(candidate) === pair);
+  if (row === undefined) return undefined;
+  const parsed = marketRowSchema.safeParse(row);
+  if (!parsed.success) {
+    throw new Error(`markets_details row for ${pair} failed schema validation: ${parsed.error.message}`);
+  }
+  return parsed.data;
+};
+
+/**
+ * Stricter-of-both: a quantity or notional that clears this spec clears
+ * either endpoint. Leverage comes only from the futures record, because
+ * markets_details reports max_leverage 0 for these pairs and would clamp
+ * every trade to zero leverage.
+ */
+export const mergeSpec = (
+  pair: string,
+  market: MarketRow,
+  futures: FuturesInstrument
+): ContractSpec => {
+  const isPerp = futures.kind === 'perpetual' && futures.status === 'active';
+  if (!isPerp || futures.margin_currency_short_name !== MARGIN_CURRENCY) {
+    throw new Error(
+      `instrument ${pair} is not an active ${MARGIN_CURRENCY} perpetual ` +
+      `(kind=${futures.kind}, status=${futures.status}, margin=${futures.margin_currency_short_name})`
+    );
+  }
+  if (market.status !== 'active') {
+    throw new Error(`instrument ${pair} is not active in markets_details (status=${market.status})`);
+  }
+  return {
+    pair,
+    baseAsset: futures.position_currency_short_name,
+    quoteAsset: MARGIN_CURRENCY,
+    tickSize: futures.price_increment,
+    lotSize: Math.max(market.step, futures.quantity_increment),
+    minQuantity: Math.max(market.min_quantity, futures.min_quantity),
+    maxQuantity: Math.min(market.max_quantity, futures.max_quantity),
+    minNotional: Math.max(market.min_notional, futures.min_notional),
+    maxLeverage: Math.min(futures.max_leverage_long, futures.max_leverage_short),
+    maintenanceMarginRate: MAINTENANCE_MARGIN_RATE_UNVERIFIED,
+  };
+};

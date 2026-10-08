@@ -7,10 +7,10 @@ import { RiskReservationManager } from '../src/engines/risk-reservations.js';
 import { PaperExecutionBroker } from '../src/infrastructure/paper/paper-broker-adapter.js';
 import { EventStore } from '../src/infrastructure/events/event-store.js';
 import { DEFAULT_RISK_LIMITS } from '../src/domain/risk/risk-config.js';
-import { FALLBACK_SPEC } from '../src/domain/futures/contract-spec.js';
+import { FALLBACK_SPEC, alignToTick } from '../src/domain/futures/contract-spec.js';
 import type { IMarketDataProvider } from '../src/infrastructure/broker/broker.js';
 import type { Candle, MarketState } from '../src/domain/market/types.js';
-import type { TradeProposal } from '../src/domain/orders/trade-proposal.js';
+import { computeRr, type TradeProposal } from '../src/domain/orders/trade-proposal.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -168,12 +168,17 @@ describe('runTradingPipeline — v3 stage semantics', () => {
     expect(trace.status).toBe('EXECUTED');
 
     // Server-side candidate resolution: proposal levels come from the
-    // canonical candidate, not from any model-supplied numbers.
+    // canonical candidate, not from any model-supplied numbers. The stop and
+    // target are then aligned onto the venue tick before validation and sizing.
     const candidate = trace.setups[0];
-    expect(trace.proposal?.entry).toBe(candidate.entry);
-    expect(trace.proposal?.stopLoss).toBe(candidate.stopLoss);
-    expect(trace.proposal?.takeProfit).toBe(candidate.takeProfit);
-    expect(trace.proposal?.direction).toBe(candidate.direction);
+    const proposal = trace.proposal!;
+    const tick = FALLBACK_SPEC('SOL').tickSize;
+    expect(proposal.entry).toBe(candidate.entry);
+    expect(proposal.direction).toBe(candidate.direction);
+    expect(proposal.stopLoss).toBe(alignToTick(candidate.stopLoss, tick, candidate.direction));
+    expect(alignToTick(proposal.takeProfit, tick, candidate.direction)).toBe(proposal.takeProfit);
+    expect(computeRr(proposal).rr).toBeGreaterThanOrEqual(deps.limits.minRiskRewardRatio);
+    expect(trace.validation?.valid).toBe(true);
 
     // Reservation committed on fill.
     expect(deps.reservations!.active()).toHaveLength(0);

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ContractRegistry, isSaneSpec } from '../src/infrastructure/coindcx/contract-registry.js';
-import { FALLBACK_SPEC } from '../src/domain/futures/contract-spec.js';
+import {
+  FALLBACK_SPEC, alignProposalForVenue, alignProposalToTick, alignToTick,
+  type ContractSpec,
+} from '../src/domain/futures/contract-spec.js';
+import { computeRr, type TradeProposal } from '../src/domain/orders/trade-proposal.js';
 import type { IExecutionBroker } from '../src/infrastructure/broker/broker.js';
 
 const realSpec = {
@@ -102,5 +106,69 @@ describe('ContractRegistry — real venue instrument specs for sizing', () => {
     expect(isSaneSpec({ ...FALLBACK_SPEC('SOL'), minQuantity: -1 })).toBe(false);
     expect(isSaneSpec({ ...FALLBACK_SPEC('SOL'), maxLeverage: 0 })).toBe(false);
     expect(isSaneSpec({ ...FALLBACK_SPEC('SOL'), maxQuantity: 0.01, minQuantity: 1 })).toBe(false);
+  });
+});
+
+const proposal = (over: Partial<TradeProposal> = {}): TradeProposal => ({
+  symbol: 'SOLUSDT', direction: 'LONG', entry: 100, stopLoss: 95, takeProfit: 115,
+  orderType: 'MARKET', leverage: 5, setupType: 'TEST', confidence: 0.8,
+  thesis: 'test thesis', invalidation: 'test invalidation', source: 'MANUAL', ...over,
+});
+
+const solSpec = async (): Promise<ContractSpec> => FALLBACK_SPEC('SOL');
+
+describe('venue tick alignment — the rounding direction never flatters the trade', () => {
+  it('floors LONG levels and ceils SHORT levels onto the tick', () => {
+    expect(alignToTick(99.237, 0.01, 'LONG')).toBe(99.23);
+    expect(alignToTick(101.237, 0.01, 'SHORT')).toBe(101.24);
+    expect(alignToTick(100.5, 0.01, 'LONG')).toBe(100.5);
+  });
+
+  it('refuses a non-positive tick and a non-finite price', () => {
+    expect(() => alignToTick(100, 0, 'LONG')).toThrow(/non-positive tick/);
+    expect(() => alignToTick(Number.NaN, 0.01, 'SHORT')).toThrow(/non-finite/);
+  });
+
+  it('moves a LONG stop away from entry and a LONG target toward entry', () => {
+    const aligned = alignProposalToTick(
+      proposal({ entry: 100.5, stopLoss: 99.237, takeProfit: 103.811 }), FALLBACK_SPEC('SOL')
+    );
+    expect(aligned.stopLoss).toBe(99.23);
+    expect(aligned.takeProfit).toBe(103.81);
+  });
+
+  it('mirrors the rule for SHORT positions', () => {
+    const aligned = alignProposalToTick(
+      proposal({ direction: 'SHORT', entry: 100.5, stopLoss: 101.237, takeProfit: 97.811 }),
+      FALLBACK_SPEC('SOL')
+    );
+    expect(aligned.stopLoss).toBe(101.24);
+    expect(aligned.takeProfit).toBe(97.82);
+  });
+
+  it('restores the R:R floor that alignment costs a target extended to exactly 2R', async () => {
+    const raw = proposal({
+      entry: 362.8855222443444, stopLoss: 328.1454125853616, takeProfit: 432.3657415623099,
+    });
+    expect(computeRr(raw).rr).toBeCloseTo(2, 9);
+    const aligned = await alignProposalForVenue(raw, solSpec, 2);
+    expect(aligned.stopLoss).toBe(328.14);
+    expect(computeRr(aligned).rr).toBeGreaterThanOrEqual(2);
+    expect(aligned.takeProfit).toBeGreaterThanOrEqual(raw.takeProfit);
+    expect(alignToTick(aligned.takeProfit, 0.01, 'LONG')).toBe(aligned.takeProfit);
+  });
+
+  it('does not repair a proposal that missed the R:R floor on its own prices', async () => {
+    const raw = proposal({ entry: 100, stopLoss: 95, takeProfit: 107 });
+    const aligned = await alignProposalForVenue(raw, solSpec, 2.5);
+    expect(computeRr(aligned).rr).toBeLessThan(2.5);
+  });
+
+  it('returns the proposal unchanged when the spec lookup fails', async () => {
+    const raw = proposal({ stopLoss: 95.004 });
+    const out = await alignProposalForVenue(raw, async () => {
+      throw new Error('venue down');
+    }, 2);
+    expect(out).toBe(raw);
   });
 });

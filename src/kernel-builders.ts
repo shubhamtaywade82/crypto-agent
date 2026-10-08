@@ -28,6 +28,7 @@ import type { KillSwitch } from './security/kill-switch.js';
 import { buildExecutor } from './kernel-executor.js';
 import type { ExecutionVenue } from './kernel.js';
 import { TradeJournal } from './engine/journal.js';
+import { isSetupType, parseEnabledSetups, type SetupType } from './engines/setup-engine.js';
 
 /**
  * Composition helpers shared by the kernel assembly (kept out of
@@ -73,17 +74,23 @@ export const buildPortfolio = (parts: PortfolioParts, limits: RiskLimits): Portf
 
 /**
  * Strategy-cell gate factory (V3.1 P0-5): ACTIVE strategy + approved
- * cell = tradable. Bootstrap policy: with ZERO registered strategies the
- * kernel cannot know which cells the research gate trusts, so trading
- * runs open — every deployment is expected to register + promote
- * strategies before scaling, after which the gate is strict.
+ * cell = tradable. ENABLED_SETUPS (default: every setup) is applied first
+ * and can only restrict. Bootstrap policy: with ZERO registered strategies the
+ * kernel cannot know which cells the research gate trusts, so trading runs
+ * open for the enabled setups. Once any strategy is registered, the registry
+ * blocks setups it does not know, so each setup to be traded must be
+ * registered and promoted.
  */
 export const buildStrategyGate = (
-  strategies: StrategyRegistry
+  strategies: StrategyRegistry,
+  enabledSetups: readonly SetupType[] = parseEnabledSetups(process.env.ENABLED_SETUPS)
 ): ((
   strategyId: string, setupType: string, regime: string
 ) => { readonly allowed: boolean; readonly reason?: string }) =>
   (strategyId, setupType, regime): { readonly allowed: boolean; readonly reason?: string } => {
+    if (!isSetupType(setupType) || !enabledSetups.includes(setupType)) {
+      return { allowed: false, reason: `setup ${setupType} disabled by ENABLED_SETUPS` };
+    }
     if (strategies.all().length === 0) return { allowed: true };
     return strategies.isCellTradable(strategyId, setupType, regime);
   };
