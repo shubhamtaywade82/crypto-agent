@@ -7,7 +7,7 @@ import type { PortfolioEngine } from './portfolio-engine.js';
 import { clusterOf } from '../domain/portfolio/portfolio-state.js';
 import type { ExecutionEngine, TrackedOrder } from './execution-engine.js';
 import type { RiskReservationManager } from './risk-reservations.js';
-import type { ContractSpec } from '../domain/futures/contract-spec.js';
+import { type ContractSpec, alignProposalForVenue } from '../domain/futures/contract-spec.js';
 import type { EventStore } from '../infrastructure/events/event-store.js';
 import type { TradeFeatureSnapshot } from '../learning/trade-ledger.js';
 import type { SizingResult } from './position-sizer.js';
@@ -214,7 +214,11 @@ export class PolicyGateway {
 
   constructor(private readonly deps: PolicyGatewayDeps) {}
 
-  async propose(proposal: TradeProposal, state: MarketState, pair: string): Promise<GatewayProposeResult> {
+  async propose(rawProposal: TradeProposal, state: MarketState, pair: string): Promise<GatewayProposeResult> {
+    // Tick alignment precedes validation: the gateway must never approve an intent the venue would reject.
+    const proposal = await alignProposalForVenue(
+      rawProposal, this.deps.specFor, this.deps.limits.minRiskRewardRatio
+    );
     const gated = await validateAndGate(this.deps, proposal, state.regime);
     if (!gated.ok) return { ok: false, approved: false, status: gated.status, reasons: gated.reasons };
 

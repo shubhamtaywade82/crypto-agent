@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { loadRiskLimits } from '../src/domain/risk/risk-config.js';
 import type { Candle, Timeframe } from '../src/domain/market/types.js';
 import { buildMtfState } from '../src/engines/mtf-engine.js';
-import { detectSetups } from '../src/engines/setup-engine.js';
+import { detectSetups, isSetupType, parseEnabledSetups, SETUP_TYPES } from '../src/engines/setup-engine.js';
 import { evaluateFunnelBar } from '../src/learning/funnel-gates.js';
 import { aggregateFunnel, sequentialDeadGate } from '../src/learning/funnel-aggregate.js';
 import { runSetupFunnel } from '../src/learning/funnel-replay.js';
@@ -128,5 +128,34 @@ describe('setup funnel (9.2B)', () => {
     const summary = aggregateFunnel(Array.from({ length: 25 }, () => row));
     expect(sequentialDeadGate(summary.gates)).toBe('macro');
     expect(summary.rejectionReasons['4H_RANGE']).toBe(25);
+  });
+});
+
+describe('ENABLED_SETUPS allowlist', () => {
+  it('enables every setup when unset or blank', () => {
+    expect(parseEnabledSetups(undefined)).toEqual([...SETUP_TYPES]);
+    expect(parseEnabledSetups('   ')).toEqual([...SETUP_TYPES]);
+  });
+
+  it('narrows to the named setups, deduplicated, in canonical order', () => {
+    expect(parseEnabledSetups(' TREND_CONTINUATION, PULLBACK_RECLAIM ,PULLBACK_RECLAIM'))
+      .toEqual(['PULLBACK_RECLAIM', 'TREND_CONTINUATION']);
+  });
+
+  it('fails closed on an unknown or mis-cased setup name', () => {
+    expect(() => parseEnabledSetups('PULLBACK_RECLAIM,pullback_reclaim'))
+      .toThrow('ENABLED_SETUPS names unknown setup(s): pullback_reclaim');
+    expect(() => parseEnabledSetups('MOMENTUM_BURST'))
+      .toThrow('ENABLED_SETUPS names unknown setup(s): MOMENTUM_BURST');
+  });
+
+  it('fails closed on a list that names no setups', () => {
+    expect(() => parseEnabledSetups(' , ,')).toThrow('ENABLED_SETUPS lists no setups');
+  });
+
+  it('accepts only the canonical setup names', () => {
+    expect(SETUP_TYPES.every((t) => isSetupType(t))).toBe(true);
+    expect(isSetupType('MOMENTUM_BURST')).toBe(false);
+    expect(isSetupType('')).toBe(false);
   });
 });

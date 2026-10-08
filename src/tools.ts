@@ -24,6 +24,7 @@ import {
 } from './engine/journal-tools.js';
 import { createKernelTools } from './tools-kernel.js';
 import { getKernel } from './kernel.js';
+import { PUBLIC_BINANCE_TOOL_NAMES, isPublicBinanceTool } from './config.js';
 
 export const adaptBinanceTool = (tool: BinanceToolDefinition, ctx: ToolContext): AnyTool =>
   defineTool({
@@ -82,19 +83,8 @@ export const createPositionSizeTool = (): AnyTool =>
     execute: async (input) => executePositionSize(input),
   });
 
-// Core subset of public market data tools (no private/signed API keys required)
-export const CORE_SPOT_TOOLS = [
-  'spot_ping',
-  'spot_server_time',
-  'spot_exchange_info',
-  'spot_ticker_price',
-  'spot_ticker_24hr',
-  'spot_book_ticker',
-  'spot_order_book',
-  'spot_recent_trades',
-  'spot_klines',
-  'spot_avg_price',
-] as const;
+// Public market-data tools only. The list is owned by config.ts so the MCP bridge shares it without loading the kernel.
+export const CORE_SPOT_TOOLS = PUBLIC_BINANCE_TOOL_NAMES;
 
 const paperOrderSchema = z.object({
   symbol: z.string().describe('Trading pair symbol, e.g. SOLUSDT'),
@@ -199,10 +189,12 @@ export const createTradingRegistry = (
   selectedTools: readonly string[] = CORE_SPOT_TOOLS,
   orchestrator?: WatchOrchestrator
 ): ToolRegistry => {
-  const ctx: ToolContext = {
-    env: 'live',
-    isSigned: Boolean(process.env.BINANCE_API_KEY),
-  };
+  // Binance is public market data only: a non-public tool name is a wiring error, not a request to honour.
+  const nonPublic = selectedTools.filter((name) => !isPublicBinanceTool(name));
+  if (nonPublic.length > 0) {
+    throw new Error(`non-public Binance tools requested: ${nonPublic.join(', ')}`);
+  }
+  const ctx: ToolContext = { env: 'live', isSigned: false };
 
   const rawTools = spotTools(binance);
   const targetSet = new Set<string>(selectedTools);

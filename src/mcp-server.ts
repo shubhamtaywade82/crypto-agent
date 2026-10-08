@@ -7,8 +7,12 @@ import {
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { spotTools, type ToolContext, type ToolDefinition } from '@nemesis-oss/binance-sdk';
-import { binanceClient } from './config.js';
+import { binanceClient, isPublicBinanceTool } from './config.js';
 import { binanceRateLimiter } from './guardians/rate-limiter.js';
+
+/** The SDK ships signed and account tools beside market data; only public names are exposed. */
+export const selectPublicTools = (all: readonly ToolDefinition[]): ToolDefinition[] =>
+  all.filter((t) => isPublicBinanceTool(t.name));
 
 const formatToolList = (tools: readonly ToolDefinition[]): Tool[] =>
   tools.map((t) => ({
@@ -54,11 +58,9 @@ export const createMcpServer = (): Server => {
     { capabilities: { tools: {} } }
   );
 
-  const ctx: ToolContext = {
-    env: 'live',
-    isSigned: Boolean(process.env.BINANCE_API_KEY),
-  };
-  const tools = spotTools(binanceClient);
+  // Market data only: never signed, whatever the environment holds.
+  const ctx: ToolContext = { env: 'live', isSigned: false };
+  const tools = selectPublicTools(spotTools(binanceClient));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: formatToolList(tools),

@@ -7,6 +7,7 @@ import type { RiskDecision } from '../domain/risk/risk-decision.js';
 import type { SizingResult } from './position-sizer.js';
 import { assessProposal, type PipelineDeps, type PipelineTrace } from './pipeline.js';
 import { resolveCandidate } from './proposal-factory.js';
+import { alignProposalForVenue } from '../domain/futures/contract-spec.js';
 import type { ChallengerVerdict, StrategyOutcome } from '../agents/schemas.js';
 import type { SetupCandidate } from './setup-engine.js';
 import type { RiskReservationManager } from './risk-reservations.js';
@@ -268,7 +269,10 @@ export const stageExecution = async (
   if (!resolution.proposal) {
     return invalidCandidate(deps, trace, resolution.unknownCandidateId);
   }
-  const proposal = resolution.proposal;
+  // Tick alignment precedes validation and sizing: no unaligned level may reach either.
+  const proposal = await alignProposalForVenue(
+    resolution.proposal, deps.specFor, deps.limits.minRiskRewardRatio
+  );
   const staged: PipelineTrace = { ...trace, proposal };
 
   // Research gate: ACTIVE strategy AND approved (setup × regime) cell.
